@@ -651,7 +651,18 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
   private async appendLines(meta: SessionHeader, events: readonly SessionEvent[]): Promise<void> {
     const content = await this.encodeEventBatch(events)
     const path = logPath(this.root, meta.cwd, meta.id, this.compression)
-    const handle = await open(path, 'a')
+    let handle
+    try {
+      handle = await open(path, 'a')
+    } catch (error) {
+      // The session directory may have been removed externally (cleanup
+      // scripts, other processes, manual rm -rf). Recreate it and retry once
+      // instead of letting one persistence failure kill the whole process
+      // (discussion #1891).
+      if (!isENOENT(error)) throw error
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+      handle = await open(path, 'a')
+    }
     let closed = false
     const closeAppendHandle = async (): Promise<void> => {
       if (closed) return
