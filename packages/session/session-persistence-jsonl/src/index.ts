@@ -9,7 +9,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { readdirSync } from 'node:fs'
-import { open, mkdir, readFile, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
+import { open, mkdir, readFile, readdir, realpath, link, rename, rm, stat, truncate } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -544,15 +544,24 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     // Publish via link()+unlink(), NOT rename(): link fails with EEXIST if the
     // final path already exists, so two processes materializing the same id
     // concurrently cannot clobber each other. rename() would silently overwrite.
-    let linked = false
+    // Some platforms (Android/Termux under SELinux) deny link(2) with EACCES
+    // even for same-owner files; fall back to rename() there (#2106).
+    let published = false
     try {
       await link(tmp, finalPath)
-      linked = true
+      published = true
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EACCES' && code !== 'EPERM' && code !== 'EXDEV' && code !== 'ENOTSUP' && code !== 'ENOSYS') {
+        throw error
+      }
+      await rename(tmp, finalPath)
+      published = true
     } finally {
       // Remove an unpublished temp on failure. After publication, defer cleanup
       // until the directory entry is durable so cleanup cannot reject a live log.
       /* v8 ignore next -- link failure is the TOCTOU/IO race guarded above; not reachable in test */
-      if (!linked) await rm(tmp, { force: true })
+      if (!published) await rm(tmp, { force: true })
     }
     // link() succeeded — the log is published. fsync the directory so the new
     // entry survives a power loss: the new link is not crash-durable until the

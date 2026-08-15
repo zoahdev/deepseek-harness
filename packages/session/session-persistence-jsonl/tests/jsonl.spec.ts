@@ -18,6 +18,10 @@ const statRace = vi.hoisted(() => ({
   reads: 0,
 }))
 
+const linkFailure = vi.hoisted(() => ({
+  code: undefined as string | undefined,
+}))
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
@@ -29,6 +33,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       if (statRace.reads !== 2) return identity
       return { ...identity, mtimeNs: identity.mtimeNs + 1n }
     }) as typeof actual.stat,
+    link: (async (...args: Parameters<typeof actual.link>) => {
+      const code = linkFailure.code
+      if (code !== undefined) {
+        linkFailure.code = undefined
+        const error = new Error(`link denied: ${code}`) as NodeJS.ErrnoException
+        error.code = code
+        throw error
+      }
+      return actual.link(...args)
+    }) as typeof actual.link,
   }
 })
 
@@ -285,6 +299,20 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     expect((await stat(dir)).isDirectory()).toBe(true)
     expect((await stat(rawLogPath(root, '/work', m.id))).isFile()).toBe(true)
     expect((await ctx.sessionPersistence.list()).map(h => h.id)).toContain(m.id)
+  })
+
+  it('falls back to rename() when link() is denied (Android/Termux SELinux, #2106)', async () => {
+    const m = meta('link-denied', '/work')
+    await ctx.sessionPersistence.create(m)
+    linkFailure.code = 'EACCES'
+    try {
+      await ctx.sessionPersistence.append(m.id, oneTurnLog())
+    } finally {
+      linkFailure.code = undefined
+    }
+    const path = rawLogPath(root, '/work', m.id)
+    expect((await stat(path)).isFile()).toBe(true)
+    expect((await ctx.sessionPersistence.load(m.id)).events.map(e => e.type)).toEqual(oneTurnLog().map(e => e.type))
   })
 
   it('readRaw returns the stored artifact text verbatim with its original filename', async () => {
