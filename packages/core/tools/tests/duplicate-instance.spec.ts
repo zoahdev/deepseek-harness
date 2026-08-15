@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { assertSchedulerProtocol, TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION } from '../src/index.ts'
 
 /**
  * Regression test for
@@ -36,5 +37,23 @@ describe('TOOL_RUNTIME_SCHEDULER', () => {
 
     const scheduler = registry[second.TOOL_RUNTIME_SCHEDULER as symbol]
     expect(scheduler?.prepare()).toBe('scheduled')
+  })
+
+  it('exposes a stable scheduler protocol version', () => {
+    expect(TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION).toBe(1)
+  })
+
+  it('accepts a scheduler whose protocol version matches', () => {
+    const scheduler = { protocolVersion: TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION, prepare: () => 'ok' }
+    expect(assertSchedulerProtocol(scheduler).prepare()).toBe('ok')
+  })
+
+  it('rejects a missing scheduler with an actionable duplicate-instance error', () => {
+    expect(() => assertSchedulerProtocol(undefined)).toThrow(/duplicate @deepseek-ai\/dsh-tools instance/)
+  })
+
+  it('rejects a version-skewed scheduler instead of running an incompatible protocol', () => {
+    const skewed = { protocolVersion: TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION + 1, prepare: () => 'old' }
+    expect(() => assertSchedulerProtocol(skewed)).toThrow(/protocol version mismatch/)
   })
 })
