@@ -227,6 +227,7 @@ interface SessionLogScan {
   meta: SessionHeader
   events: SessionEvent[]
   committedBytes: number
+  skippedDuplicateSeqs: number[]
 }
 
 /** Parse one complete header record supplied independently from event rows. */
@@ -279,6 +280,7 @@ export class SessionLogScanner {
   private eventLine = 0
   private issue: Error | undefined
   private finished = false
+  private readonly skippedDuplicateSeqs: number[] = []
 
   /**
    * Create an event scanner from exactly one newline-terminated header record.
@@ -340,7 +342,12 @@ export class SessionLogScanner {
    */
   finish(): SessionLogScan {
     this.finished = true
-    return { meta: this.meta, events: this.events, committedBytes: this.committedBytes }
+    return {
+      meta: this.meta,
+      events: this.events,
+      committedBytes: this.committedBytes,
+      skippedDuplicateSeqs: this.skippedDuplicateSeqs,
+    }
   }
 
   /** Decode one complete event row and update the contiguous prefix. */
@@ -362,6 +369,14 @@ export class SessionLogScanner {
     const rowStart = this.events.length
     for (const event of decoded) {
       if (event.seq !== this.events.length) {
+        // Tolerate a single duplicate seq (same number as the last accepted
+        // event): a reopen/append race can mint the same seq twice (#2068), and
+        // refusing the whole log loses the user's entire history. Skip the
+        // duplicate; the next event must still continue the contiguity contract.
+        if (event.seq === this.events.length - 1) {
+          this.skippedDuplicateSeqs.push(event.seq)
+          continue
+        }
         const expected = this.events.length
         this.events.length = rowStart
         this.issue = new Error(

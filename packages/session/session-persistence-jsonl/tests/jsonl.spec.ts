@@ -855,6 +855,21 @@ describe('JsonlSessionPersistence: scanLog unit', () => {
     ].join('\n'))) }).toThrow(/seq gap in committed region/)
   })
 
+  it('skips a single duplicate seq and keeps the contiguity contract (#2068)', () => {
+    const header = Buffer.from(`${JSON.stringify(toHeaderLine(meta('scanner-dup-seq')))}\n`)
+    const scanner = new SessionLogScanner(header)
+    scanner.write(Buffer.from([
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } }),
+      JSON.stringify({ type: 'session/end-seed', seq: 1, time: 1, data: {} }),
+      JSON.stringify({ type: 'agent/inbox/spliced', seq: 1, time: 2, data: {} }),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 3, data: { turn: 1, reason: { kind: 'completed' } } }),
+      '',
+    ].join('\n')))
+    const result = scanner.finish()
+    expect(result.events.map(event => event.seq)).toEqual([0, 1, 2])
+    expect(result.skippedDuplicateSeqs).toEqual([1])
+  })
+
   it('incrementally scans records split across reusable decoder chunks', () => {
     const header = Buffer.from(`${JSON.stringify(toHeaderLine(meta('incremental')))}\n`)
     const body = Buffer.from(`${oneTurnLog().map(event => JSON.stringify(event)).join('\n').replace('"hi"', '"你好"')}\n`)
