@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { loadLayeredEnv } from '@deepseek-ai/dsh-app-boot'
 import { parseDshArgs } from './args.ts'
+import { runtimeSupportError } from './runtime-check.ts'
 
 // Both the source tree (apps/cli/src) and the bundled bin (apps/cli/lib) sit
 // one directory under apps/cli, so the checked-in manifest resolves with the
@@ -25,6 +26,12 @@ function readVersion(): string {
 }
 
 const invocation = parseDshArgs(process.argv.slice(2), readVersion())
+
+const unsupported = runtimeSupportError()
+if (unsupported !== null) {
+  process.stderr.write(`dsh: ${unsupported}\n`)
+  process.exit(1)
+}
 
 switch (invocation.mode) {
   case 'profile': {
