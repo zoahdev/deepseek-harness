@@ -649,7 +649,7 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
     expect((await ctx.sessionPersistence.load(header.id)).events).toEqual([...oneTurnLog(), ...secondTurn])
   })
 
-  it('skips empty, incomplete, and non-header compressed artifacts while rejecting malformed header frames', async () => {
+  it('skips empty, incomplete, and non-header artifacts, and isolates one corrupt header frame (#2002)', async () => {
     const root = await freshRoot()
     for (const [id, content] of [
       ['empty', Buffer.alloc(0)],
@@ -670,7 +670,14 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
       JSON.stringify({ type: 'turn/start' }),
       '',
     ].join('\n')))
-    await expect(ctx.sessionPersistence.list()).rejects.toThrow(/first frame is not exactly one header line/)
+    // A malformed first frame must not fail the whole listing: it is skipped
+    // with a warning, and other sessions stay reachable.
+    const goodId = SessionId('good')
+    await mkdir(sessionDir(root, undefined, goodId), { recursive: true })
+    await writeFile(logPath(root, undefined, goodId, 'zstd'), await compressZstdFrame(
+      `${JSON.stringify(toHeaderLine(meta('good')))}\n`,
+    ))
+    expect((await ctx.sessionPersistence.list()).map(item => item.id)).toEqual([goodId])
     await expect(ctx.sessionPersistence.load(SessionId('two-lines')))
       .rejects.toThrow(/first frame is not exactly one header line/)
   })
@@ -691,7 +698,8 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
       .rejects.toThrow(/empty or header-less Zstandard session log/)
     await expect(ctx.sessionPersistence.load(SessionId('empty-header')))
       .rejects.toThrow(/first frame is not exactly one header line/)
-    await expect(ctx.sessionPersistence.list()).rejects.toThrow(/header frame failed validation/)
+    // Targeted reads still reject; listing isolates the corrupt artifact.
+    expect(await ctx.sessionPersistence.list()).toEqual([])
   })
 })
 

@@ -488,14 +488,33 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
         signal?.throwIfAborted()
         if (!pathExists) continue
         // Read only headers so listing scales with session count, not log size.
-        const first = this.compression === 'zstd'
-          ? await this.readFirstZstdLine(path, signal)
-          : await this.readFirstLine(path, signal)
+        let first: string | undefined
+        try {
+          first = this.compression === 'zstd'
+            ? await this.readFirstZstdLine(path, signal)
+            : await this.readFirstLine(path, signal)
+          signal?.throwIfAborted()
+        } catch (error) {
+          // A single corrupt session log must never take down the whole
+          // service (discussion #2002): skip it with a loud warning so boot
+          // continues and every other session stays reachable.
+          this.ctx.logger.warn(
+            `session-persistence-jsonl: skipping corrupt session log ${path}: ${String(error)}`,
+          )
+          continue
+        }
         signal?.throwIfAborted()
         if (first === undefined) continue // empty/half-written file
         const meta = parseHeaderMeta(first)
         if (meta === undefined) continue // not a session header
-        await this.assertStoredIdentity(path, meta, undefined, signal)
+        try {
+          await this.assertStoredIdentity(path, meta, undefined, signal)
+        } catch (error) {
+          this.ctx.logger.warn(
+            `session-persistence-jsonl: skipping session log with mismatched identity ${path}: ${String(error)}`,
+          )
+          continue
+        }
         signal?.throwIfAborted()
         if (ids.has(meta.id)) {
           throw new Error(`duplicate JSONL session id "${meta.id}" appears in multiple project directories`)
