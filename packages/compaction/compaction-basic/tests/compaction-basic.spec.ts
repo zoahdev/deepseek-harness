@@ -12,7 +12,7 @@ import {
   resolveTargetPolicy,
 } from '@deepseek-ai/dsh-compaction-basic/src/config.ts'
 import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
-import LlmRuntime, { createUserMessage, CallId, CONTEXT_WINDOW_EXCEEDED_CODE, createToolResultMessage, LlmAdapter , createMessage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, CallId, CONTEXT_WINDOW_EXCEEDED_CODE, createToolResultMessage, LlmAdapter, ReasoningEffortId, createMessage } from '@deepseek-ai/dsh-llm'
 import type {
   ContentBlock,
   GenerateOptions,
@@ -1137,6 +1137,23 @@ class ScriptedAdapter extends LlmAdapter {
   }
 }
 
+class ReasoningScriptedAdapter extends ScriptedAdapter {
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({
+      provider,
+      id: model,
+      name: model,
+      reasoning: {
+        efforts: [
+          { id: ReasoningEffortId('high'), name: 'High' },
+          { id: ReasoningEffortId('low'), name: 'Low' },
+        ],
+        defaultEffort: ReasoningEffortId('low'),
+      },
+    })
+  }
+}
+
 class ExposedCompactionEngine extends BasicCompactionEngine {
   runSummarize(
     input: SummarizationInput,
@@ -1179,7 +1196,7 @@ describe('default one-shot summarizer', () => {
     }>().not.toExtend<SummaryResult>()
   })
 
-  it('uses configured model/default cap, forwards cancellation, and keeps only safe text', async () => {
+  it('uses configured model, forwards cancellation, and keeps only safe text', async () => {
     const { adapter, compact } = await summarizerHarness([
       { type: 'reasoning', text: 'private' },
       { type: 'text', text: 'public summary' },
@@ -1204,17 +1221,16 @@ describe('default one-shot summarizer', () => {
       llmStreamCall: true,
       provider: MODEL,
       model: MODEL,
-      maxTokens: 321,
       usage: adapter.usage,
     })
     expect(adapter.lastOptions).toMatchObject({
       provider: MODEL,
       model: MODEL,
-      maxTokens: 321,
       signal: SIGNAL,
       sessionId: session.id,
       purpose: 'compaction',
     })
+    expect(adapter.lastOptions?.maxTokens).toBeUndefined()
     const instruction = adapter.lastOptions?.messages.at(-1)?.content[0]
     expect(instruction?.type === 'text' ? instruction.text : '').toContain('## Primary Request and Intent')
   })
@@ -1287,14 +1303,13 @@ describe('default one-shot summarizer', () => {
     expect(output).toMatchObject({
       provider: 'policy-summary',
       model: 'policy-summary',
-      maxTokens: 222,
     })
     expect(policyAdapter.lastOptions).toMatchObject({
       provider: 'policy-summary',
       model: 'policy-summary',
-      maxTokens: 222,
       system: 'WARM SYSTEM',
     })
+    expect(policyAdapter.lastOptions?.maxTokens).toBeUndefined()
     expect(policyAdapter.lastOptions?.messages[0]).toEqual(prefix)
   })
 
@@ -1310,6 +1325,67 @@ describe('default one-shot summarizer', () => {
     expect(output.model).toBe('routed')
     expect(adapter.lastOptions?.provider).toBe('routed')
     expect(adapter.lastOptions?.model).toBe('routed')
+  })
+
+  it('inherits the routed header config wholesale so the compaction call keeps the provider cache key', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    void new TokenMeter(ctx)
+    const adapter = new ReasoningScriptedAdapter([{ type: 'text', text: 'summary' }])
+    ctx.llm.registerAdapter(['routed'], adapter)
+    const compact = new ExposedCompactionEngine(ctx, { auto: false })
+    const session = conversation(1)
+    session.append('request/header', {
+      header: {
+        config: {
+          provider: 'routed',
+          model: 'routed',
+          reasoningEffort: ReasoningEffortId('high'),
+          maxTokens: 4096,
+        },
+      },
+      reason: 'initial',
+    })
+    const output = await compact.runSummarize(promptInput('history'), agent(session, 'fallback'))
+    expect(output).toMatchObject({
+      provider: 'routed',
+      model: 'routed',
+      maxTokens: 4096,
+    })
+    expect(adapter.lastOptions).toMatchObject({
+      provider: 'routed',
+      model: 'routed',
+      reasoningEffort: 'high',
+      maxTokens: 4096,
+      purpose: 'compaction',
+    })
+  })
+
+  it('drops adapter-defaulted reasoningEffort/maxTokens like agent-loop', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    void new TokenMeter(ctx)
+    const adapter = new ReasoningScriptedAdapter([{ type: 'text', text: 'summary' }])
+    ctx.llm.registerAdapter(['routed'], adapter)
+    const compact = new ExposedCompactionEngine(ctx, { auto: false })
+    const session = conversation(1)
+    session.append('request/header', {
+      header: {
+        config: {
+          provider: 'routed',
+          model: 'routed',
+          reasoningEffort: ReasoningEffortId('high'),
+          maxTokens: 4096,
+        },
+        adapterDefaults: { reasoningEffort: true, maxTokens: true },
+      },
+      reason: 'initial',
+    })
+    await compact.runSummarize(promptInput('history'), agent(session, 'fallback'))
+    expect(adapter.lastOptions).toMatchObject({ provider: 'routed', model: 'routed' })
+    // The explicit header effort was dropped; the adapter default materializes.
+    expect(adapter.lastOptions?.reasoningEffort).toBe('low')
+    expect(adapter.lastOptions?.maxTokens).toBeUndefined()
   })
 
   it('records the model actually dispatched after one-shot stream routing', async () => {

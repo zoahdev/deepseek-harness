@@ -7,7 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { contentHasImage, createUserMessage, BlockAssembler, LlmError } from '@deepseek-ai/dsh-llm'
 import type {
-  ContentBlock, FinishReason, GenerateOptions, Message, TokenUsage, ToolSchema,
+  ContentBlock, FinishReason, GenerateOptions, LlmCallConfig, Message, TokenUsage, ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 
@@ -15,6 +15,29 @@ interface SummaryConfig {
   readonly summarizationProvider: string
   readonly summarizationModel: string
   readonly maxTokens: number
+}
+
+/** Shape of `session.requestHeader()` as consumed by the summarizer. */
+interface RoutedRequestHeader {
+  readonly config?: LlmCallConfig
+  readonly adapterDefaults?: {
+    readonly reasoningEffort?: boolean
+    readonly maxTokens?: boolean
+  }
+}
+
+/**
+ * Reuse the last routed header config so the auxiliary compaction call keeps
+ * the provider cache key identical to normal turns (reasoningEffort, maxTokens,
+ * and any other request parameters). Adapter-defaulted fields are dropped the
+ * same way `dsh-agent-loop`'s request proposal does.
+ */
+function inheritRequestConfig(header: RoutedRequestHeader | undefined): Partial<LlmCallConfig> {
+  if (header?.config === undefined) return {}
+  const proposal: Partial<LlmCallConfig> = { ...header.config }
+  if (header.adapterDefaults?.reasoningEffort === true) delete proposal.reasoningEffort
+  if (header.adapterDefaults?.maxTokens === true) delete proposal.maxTokens
+  return proposal
 }
 
 /** Tags wrapping the structured summary inside the landed checkpoint node. */
@@ -125,7 +148,8 @@ export async function summarizeWithLlm(
   agent: Agent,
   signal?: AbortSignal,
 ): Promise<SummaryResult> {
-  const latest = agent.session.requestHeader()?.config
+  const latestHeader = agent.session.requestHeader()
+  const latest = latestHeader?.config
   const configured = config.summarizationProvider.length === 0
     ? undefined
     : { provider: config.summarizationProvider, model: config.summarizationModel }
@@ -151,12 +175,12 @@ export async function summarizeWithLlm(
     }),
   ]
   const options: GenerateOptions = {
+    ...inheritRequestConfig(latestHeader),
     provider: target.provider,
     model: target.model,
     messages,
     ...input.system === undefined ? {} : { system: input.system },
     ...input.tools === undefined ? {} : { tools: [...input.tools] },
-    maxTokens: config.maxTokens,
     sessionId: agent.session.id,
     purpose: 'compaction',
     ...signal === undefined ? {} : { signal },
@@ -176,7 +200,7 @@ export async function summarizeWithLlm(
     llmStreamCall: true,
     provider: options.provider,
     model: options.model,
-    maxTokens: config.maxTokens,
+    ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
     ...(assembler.usage === undefined ? {} : { usage: assembler.usage }),
   }
 }
