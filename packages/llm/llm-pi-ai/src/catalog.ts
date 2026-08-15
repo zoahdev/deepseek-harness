@@ -172,6 +172,35 @@ export function catalogModels(provider: string): Map<string, Model<Api>> {
   return new Map(models.map(model => [model.id, model]))
 }
 
+const GLOBAL_MODEL_CACHE = new Map<string, Model<Api> | undefined>()
+
+/**
+ * Find one model across every installed provider catalog by model id.
+ *
+ * A hand-declared route with a private provider key cannot look its models up
+ * in `catalogModels(provider)`, so a model that genuinely exists in the
+ * installed catalog (e.g. an OpenAI id served through a translation gateway)
+ * silently lost its catalog-known modalities and fell back to the route's
+ * `defaultInput` - image-capable ids were reported as text-only (discussion
+ * #1992). The id-level lookup is used ONLY for capability facts like input
+ * modalities; `api` / `baseUrl` still come from the route so a foreign
+ * catalog entry can never leak its wire protocol.
+ */
+function globalCatalogModel(id: string): Model<Api> | undefined {
+  if (!GLOBAL_MODEL_CACHE.has(id)) {
+    let found: Model<Api> | undefined
+    for (const provider of catalogProviders().keys()) {
+      const model = catalogModels(provider).get(id)
+      if (model !== undefined) {
+        found = model
+        break
+      }
+    }
+    GLOBAL_MODEL_CACHE.set(id, found)
+  }
+  return GLOBAL_MODEL_CACHE.get(id)
+}
+
 /**
  * Selectable reasoning efforts for one model: each key is a level the model
  * offers (and selectors show), and its value is the wire spelling dispatch
@@ -494,6 +523,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
     if (seen.has(entry.id)) invalid(provider, `lists model "${entry.id}" more than once`)
     seen.add(entry.id)
     const base = defaults.get(entry.id)
+    const modalityBase = defaults.get(entry.id) ?? globalCatalogModel(entry.id)
     const api = request.api ?? base?.api ?? routeApi
     if (api === undefined) {
       invalid(provider, `model "${entry.id}" needs an api; the installed catalog does not describe it, so set the`
@@ -530,7 +560,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
       api,
       provider,
       baseUrl,
-      input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput],
+      input: declaredInput(entry.input) ?? modalityBase?.input ?? base?.input ?? [...request.defaultInput],
       cost: base?.cost ?? NO_COST,
       contextWindow,
       maxTokens,

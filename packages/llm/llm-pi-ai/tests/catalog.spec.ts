@@ -220,6 +220,26 @@ describe('hand-declared providers', () => {
     expect(inputOf('anthropic', vision.id)).toEqual(vision.input)
   })
 
+  it('inherits catalog-known modalities by model id on custom routes (#1992)', () => {
+    const vision = getBuiltinModels('anthropic').find(model => model.input.includes('image'))
+    if (vision === undefined) throw new Error('the installed catalog ships no anthropic vision model')
+    const resolved = resolveProfiles({
+      'my-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://my.test',
+        defaultInput: ['text'],
+        models: [{ id: vision.id }],
+      },
+    })
+    const routeModel = resolved.get('my-gateway')?.piProvider.getModels()
+      .find(model => model.id === vision.id)
+    // The private route key cannot look the model up by provider, so the
+    // id-level catalog fallback must supply the catalog-known modalities;
+    // api/baseUrl stay the route's own.
+    expect(routeModel?.input).toEqual(vision.input)
+    expect(routeModel?.api).toBe('openai-completions')
+  })
+
   it('carries a written modality declaration all the way to the seam’s model metadata', async () => {
     // The resolver-level cases above cannot see a break between the settings
     // document and `LlmModelInfo`, so each rung is asserted once more through
