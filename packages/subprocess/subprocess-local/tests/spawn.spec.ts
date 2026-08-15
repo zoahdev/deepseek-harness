@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -438,6 +438,23 @@ describe('OutputCollector', () => {
     expect(out.text).toBe('6789abcdef')
     expect(out.truncated).toBe(true)
     expect(readFileSync(out.spillPath!, 'utf8')).toBe('0123456789abcdef')
+  })
+
+  it('recreates a purged spill directory (ENOENT) instead of crashing', () => {
+    // Windows Storage Sense / third-party cleaners can remove %TEMP% dirs
+    // while the service runs; the spill path must be recreated, not fatal.
+    const missingDir = join(
+      tmpdir(),
+      `dsh-subprocess-spec-missing-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    )
+    const collector = new OutputCollector(10, 100, 'test', missingDir)
+    collector.push(Buffer.from('0123456789abcdef'))
+    const out = collector.finalize()
+    expect(out.text).toBe('6789abcdef')
+    expect(out.truncated).toBe(true)
+    expect(out.spillPath).toBeDefined()
+    expect(readFileSync(out.spillPath!, 'utf8')).toBe('0123456789abcdef')
+    rmSync(missingDir, { recursive: true, force: true })
   })
 
   it('retains a byte-exact tail across uneven chunk boundaries', () => {

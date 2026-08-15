@@ -10,7 +10,7 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { randomBytes } from 'node:crypto'
-import { closeSync, mkdtempSync, openSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, mkdirSync, mkdtempSync, openSync, unlinkSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleepMs } from 'node:timers/promises'
@@ -91,6 +91,14 @@ function privateSpillDir(): string {
   return defaultSpillDir
 }
 
+/** ENOENT = a path or its parent vanished (e.g. tmpdir purged while running). */
+function isEnoentError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'ENOENT'
+}
+
 /**
  * Collects one stream with a bounded in-memory tail. With a spill cap, on
  * first overflow a spill file is created and every chunk (including those
@@ -166,7 +174,22 @@ export class OutputCollector {
         this.spillDir,
         `dsh-subprocess-${process.pid}-${++spillCounter}-${randomBytes(6).toString('hex')}-${this.label}.log`,
       )
-      this.spillFd = openSync(this.spillFile, 'wx', 0o600)
+      try {
+        this.spillFd = openSync(this.spillFile, 'wx', 0o600)
+      } catch (error) {
+        if (!isEnoentError(error)) throw error
+        // The OS tmpdir can be purged while the service runs (Windows
+        // Storage Sense / third-party cleaners). Recreate the private spill
+        // directory and retry once; if that still fails, degrade to the
+        // in-memory tail instead of crashing from a stream 'data' callback.
+        try {
+          mkdirSync(this.spillDir, { recursive: true, mode: 0o700 })
+          this.spillFd = openSync(this.spillFile, 'wx', 0o600)
+        } catch {
+          this.discardSpill()
+          return
+        }
+      }
       for (const prior of this.chunks) writeSync(this.spillFd, prior)
     }
     writeSync(this.spillFd, chunk)
