@@ -234,6 +234,41 @@ describe('skill-filesystem watcher failures', () => {
     await fiber.dispose()
   })
 
+  it('contains ELOOP startup errors per root instead of failing provider load', async () => {
+    const home = await tempDir('skill-watch-eloop')
+    const root = join(home, '.dsh/skills')
+    await writeSkill(root, 'eloop-skill')
+    const eloop = new Error('ELOOP: too many symbolic links encountered')
+    ;(eloop as Error & { code?: string }).code = 'ELOOP'
+    watcherHarness.startupErrors.push(eloop)
+    const ctx = new Context()
+    await ctx.plugin(SkillRegistry)
+    const fiber = await ctx.plugin(SkillFileSystem, {
+      dshHome: join(home, '.dsh'),
+      agentsHome: join(home, '.agents'),
+      watch: true,
+      watchPollIntervalMs: 10,
+      watchStabilityThresholdMs: 20,
+    })
+    try {
+      // Provider load must not reject and the skill catalog must stay readable.
+      expect((await ctx.skills.list()).map(skill => skill.name)).toEqual(['eloop-skill'])
+      expect((await ctx.skills.get('eloop-skill'))?.content).toBe('Body.')
+      // The degraded root is retried; the next attempt succeeds and recovers.
+      await vi.waitFor(() => {
+        expect(watcherHarness.watchers.length).toBeGreaterThanOrEqual(2)
+      })
+      await settle()
+      expect(await ctx.skills.snapshot()).toMatchObject({
+        skills: [{ name: 'eloop-skill' }],
+        complete: true,
+      })
+    } finally {
+      await fiber.dispose()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('filters events, coalesces invalidation, recovers runtime errors, and contains late callbacks', async () => {
     const home = await tempDir('skill-watch-runtime-error')
     const root = join(home, '.dsh/skills')

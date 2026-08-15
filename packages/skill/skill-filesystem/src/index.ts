@@ -439,6 +439,7 @@ class SkillWatchManager {
       const watcher = mode.kind === 'ancestor'
         ? this.openAncestorWatcher(state, mode)
         : await this.openRootWatcher(state, mode)
+      if (watcher === undefined) return undefined
       const current = await resolveRootWatchMode(state.root.path, this.config.followSymlinks)
       /* v8 ignore else -- A host path transition between the two probes is timing-dependent. */
       if (sameWatchMode(mode, current)) return watcher
@@ -484,7 +485,7 @@ class SkillWatchManager {
     this.scheduleRewatch(state)
   }
 
-  private async openRootWatcher(state: RootWatchState, mode: Extract<RootWatchMode, { kind: 'root' }>): Promise<WatchHandle> {
+  private async openRootWatcher(state: RootWatchState, mode: Extract<RootWatchMode, { kind: 'root' }>): Promise<WatchHandle | undefined> {
     const watcher = chokidar.watch(mode.anchor, {
       // Chokidar owns late native fs.watch errors only for persistent watchers;
       // this provider's effect explicitly closes every handle at teardown.
@@ -505,6 +506,7 @@ class SkillWatchManager {
       close: () => watcher.close(),
     }
     let ready = false
+    let degradedByEloop = false
     const readiness = Promise.withResolvers<undefined>()
     const signal = this.lifecycle.signal
     if (signal.aborted) {
@@ -515,6 +517,16 @@ class SkillWatchManager {
     signal.addEventListener('abort', onAbort, { once: true })
     const onError = (error: unknown): void => {
       if (!ready) {
+        if (isEloopError(error)) {
+          // ELOOP (circular junction/symlink chain, Windows junctions
+          // included): degrade this root and let the caller skip it instead of
+          // rejecting provider load - one corrupted directory must never take
+          // down the whole process. The scheduled rewatch retries later.
+          degradedByEloop = true
+          this.handleWatcherError(state, error)
+          readiness.resolve(undefined)
+          return
+        }
         readiness.reject(error)
         return
       }
@@ -535,6 +547,10 @@ class SkillWatchManager {
       throw error
     } finally {
       signal.removeEventListener('abort', onAbort)
+    }
+    if (degradedByEloop) {
+      await this.closeWatcher(handle)
+      return undefined
     }
     return handle
   }
@@ -1038,4 +1054,12 @@ function optionalMetadata(data: Record<string, unknown>): { metadata?: Record<st
 
 function errorMessage(error: unknown): string {
   return String(error)
+}
+
+/** ELOOP = circular symlink/junction chain (Windows junctions included). */
+function isEloopError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'ELOOP'
 }
