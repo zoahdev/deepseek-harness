@@ -123,7 +123,23 @@ interface StoredRemoteMethodMarker {
   readonly invocation: RemoteInvocationMarker
 }
 
-const markers = new WeakMap<object, Map<string, StoredRemoteMethodMarker>>()
+/**
+ * Cross-copy marker registry key.
+ *
+ * Under source launch (`node --import tsx/esm apps/cli/src/bin.ts`), tsx
+ * rewrites in-repo bare imports to `src/`, while out-of-tree plugins resolve
+ * the published `lib/` copy. Two module instances mean two private WeakMaps:
+ * decorator markers written into one copy are invisible to the other, so
+ * every out-of-tree plugin Remote endpoint returns a silent 404 (discussion
+ * #1993). A `Symbol.for`-keyed registry on globalThis is shared by every
+ * physical copy of this package - the same mechanism as the tool scheduler
+ * protocol key in #1697.
+ */
+const REMOTE_MARKERS_KEY = Symbol.for('@deepseek-ai/dsh-typert-protocol/remote-markers')
+type RemoteMarkerRegistry = WeakMap<object, Map<string, StoredRemoteMethodMarker>>
+const markers: RemoteMarkerRegistry = (
+  (globalThis as Record<symbol, unknown>)[REMOTE_MARKERS_KEY] as RemoteMarkerRegistry | undefined
+) ?? ((globalThis as Record<symbol, unknown>)[REMOTE_MARKERS_KEY] = new WeakMap())
 
 /**
  * Bind one visible Service field to a Cordis key and Remote namespace.

@@ -127,6 +127,29 @@ describe('typert-protocol Remote declarations', () => {
     expect(Reflect.ownKeys(Goals.prototype)).toEqual(['constructor', 'create', 'scoped'])
   })
 
+  it('shares decorator markers across physical module copies (src vs lib, #1993)', async () => {
+    // Source launch loads the in-repo package from src/ while out-of-tree
+    // plugins resolve lib/. The Symbol.for-keyed registry must let one copy
+    // read markers written by the other.
+    const firstSpecifier = '@deepseek-ai/dsh-typert-protocol?copy=1993-first'
+    const secondSpecifier = '@deepseek-ai/dsh-typert-protocol?copy=1993-second'
+    const first = await import(firstSpecifier)
+    const second = await import(secondSpecifier)
+    const initializers: Array<(this: object) => void> = []
+    class Goals {
+      create(agent: object, request: object): object {
+        return { agent, request }
+      }
+    }
+    first.Remote(
+      Reflect.get(Goals.prototype, 'create') as (this: Goals, ...args: unknown[]) => unknown,
+      methodContext('create', initializers),
+    )
+    const goals = new Goals()
+    for (const initialize of initializers) initialize.call(goals)
+    expect(second.remoteMethods(goals)).toEqual([{ method: 'create', invocation: { kind: 'direct' } }])
+  })
+
   it('keeps markers idempotent across instances and returns detached snapshots', () => {
     class Service {
       run(value: string): string {
