@@ -671,6 +671,7 @@ describe('plugin registration and config', () => {
         reasoning: {
           efforts: [
             { id: ReasoningEffortId('off'), name: 'Off' },
+            { id: ReasoningEffortId('low'), name: 'Low' },
             { id: ReasoningEffortId('high'), name: 'High' },
             { id: ReasoningEffortId('max'), name: 'Max' },
           ],
@@ -691,6 +692,7 @@ describe('plugin registration and config', () => {
         reasoning: {
           efforts: [
             { id: ReasoningEffortId('off'), name: 'Off' },
+            { id: ReasoningEffortId('low'), name: 'Low' },
             { id: ReasoningEffortId('high'), name: 'High' },
             { id: ReasoningEffortId('max'), name: 'Max' },
           ],
