@@ -156,15 +156,15 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
           toolBlocks.set(call.index, block)
           yield { type: 'block-start', index: block.index, blockType: 'tool-call' }
         }
-        if (call.id !== undefined) block.callId = call.id
-        if (call.function?.name !== undefined) block.name = call.function.name
+        if (call.id != null) block.callId = call.id
+        if (call.function?.name != null) block.name = call.function.name
         const fragment = call.function?.arguments ?? ''
         block.text += fragment
         yield {
           type: 'tool-call-delta',
           index: block.index,
           id: CallId(block.callId ?? ''),
-          ...block.name !== undefined ? { name: block.name } : {},
+          ...block.name != null ? { name: block.name } : {},
           argumentsDelta: fragment,
         }
       }
