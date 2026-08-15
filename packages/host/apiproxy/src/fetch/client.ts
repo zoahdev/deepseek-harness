@@ -418,7 +418,11 @@ export abstract class AbstractApiClient implements IApiClient {
     selectModel: (payload, signal) => this.callUnary('session.selectModel', payload, signal),
     rename: (payload, signal) => this.callUnary('session.rename', payload, signal),
     fork: (payload, signal) => this.callUnary('session.fork', payload, signal),
-    prompt: (payload, signal) => this.callUnary('session.prompt', payload, signal),
+    // A prompt is user-paced: under host load (plugins/background tasks) the
+    // turn can legitimately exceed the bounded unary deadline, so the client
+    // must not abort it with a fixed 30s timeout (discussion #2060). Caller
+    // and connection aborts remain.
+    prompt: (payload, signal) => this.callUnary('session.prompt', payload, signal, 'caller-signal-only'),
     attachment: (payload, signal) => this.callUnary('session.attachment', payload, signal),
     updateQueue: (payload, signal) => this.callUnary('session.updateQueue', payload, signal),
     cancel: (payload, signal) => this.callUnary('session.cancel', payload, signal),
@@ -427,7 +431,7 @@ export abstract class AbstractApiClient implements IApiClient {
   readonly subagents: IApiClient['subagents'] = {
     list: (payload, signal) => this.callUnary('subagent.list', payload, signal),
     history: (payload, signal) => this.callUnary('subagent.history', payload, signal),
-    prompt: (payload, signal) => this.callUnary('subagent.prompt', payload, signal),
+    prompt: (payload, signal) => this.callUnary('subagent.prompt', payload, signal, 'caller-signal-only'),
     interrupt: (payload, signal) => this.callUnary('subagent.interrupt', payload, signal),
   }
 
