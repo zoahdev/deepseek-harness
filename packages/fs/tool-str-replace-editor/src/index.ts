@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsInfo, FsTarget, FsWriteIntent } from '@deepseek-ai/dsh-fs'
-import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
+import { sandboxDenialMarker, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -64,18 +64,45 @@ function lineNumbersAt(content: string, offsets: readonly number[]): number[] {
 
 class MutationPolicy {
   private readonly policy: SandboxPolicyService | undefined
+  private readonly selfEnforces: boolean
 
   constructor(ctx: Context) {
-    this.policy = ctx.fs.sandboxMode === undefined ? undefined : ctx.get('sandboxPolicy')
-    if (ctx.fs.sandboxMode !== undefined && this.policy === undefined) {
+    const confines = ctx.fs.sandboxMode !== undefined
+    const policy = ctx.get('sandboxPolicy')
+    if (confines && policy === undefined) {
       throw new Error('tool-str-replace-editor: the mounted filesystem confines but ctx.sandboxPolicy is missing')
     }
+    this.policy = policy
+    this.selfEnforces = !confines
   }
 
   resolve(exec: ToolRunContext): SandboxExecutionPolicy | undefined {
     return this.policy?.resolve({
       ...exec.agent === undefined ? {} : { session: exec.agent.session },
     })
+  }
+
+  /**
+   * Enforce the file-effect policy at the tool layer when the mounted
+   * filesystem does not confine (`ctx.fs.sandboxMode === undefined`, e.g. the
+   * minimal preset's bare `fs-local`). A confining backend already fences the
+   * mutation inside `writeText`; a bare backend silently ignores the policy
+   * argument, so the editor must refuse out-of-mode writes itself.
+   */
+  async assertWritable(
+    ctx: Context,
+    target: FsTarget,
+    sandboxPolicy: SandboxExecutionPolicy | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!this.selfEnforces || sandboxPolicy === undefined || sandboxPolicy.mode === 'danger-full-access') return
+    if (sandboxPolicy.mode === 'read-only') {
+      throw new FsError(sandboxDenialMarker('read-only'), 'FS_SANDBOX_DENIED')
+    }
+    for (const root of writableRoots(sandboxPolicy)) {
+      if (ctx.fs.contains(await ctx.fs.resolve(root, { signal }), target)) return
+    }
+    throw new FsError(sandboxDenialMarker('workspace-write'), 'FS_SANDBOX_DENIED')
   }
 
   mapError(error: unknown, policy: SandboxExecutionPolicy | undefined): unknown {
@@ -246,6 +273,7 @@ async function createFile(
   const content = requiredForCommand(fileText, 'file_text', 'create')
   const sandboxPolicy = policy.resolve(exec)
   const target = await resolveTarget(ctx, path, exec.signal)
+  await policy.assertWritable(ctx, target, sandboxPolicy, exec.signal)
   if (await ctx.fs.stat(target, exec.signal) !== undefined) {
     throw new Error(`File already exists at: ${target.displayPath}. Cannot overwrite files using command \`create\`.`)
   }
@@ -281,6 +309,7 @@ async function replaceInFile(
 ): Promise<string> {
   const sandboxPolicy = policy.resolve(exec)
   const target = await resolveTarget(ctx, path, exec.signal)
+  await policy.assertWritable(ctx, target, sandboxPolicy, exec.signal)
   const intent = await ctx.waterfall('fs/edit-intent', target, exec, () => undefined)
   const oldValue = requiredForCommand(oldStr, 'old_str', 'str_replace', false)
   const newValue = newStr ?? ''
@@ -334,6 +363,7 @@ async function insertInFile(
   const value = requiredForCommand(newStr, 'new_str', 'insert')
   const sandboxPolicy = policy.resolve(exec)
   const target = await resolveTarget(ctx, path, exec.signal)
+  await policy.assertWritable(ctx, target, sandboxPolicy, exec.signal)
   const intent = await ctx.waterfall('fs/edit-intent', target, exec, () => undefined)
   const info = await statExisting(ctx, target, 'insert', exec)
   if (info.type !== 'file') {

@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -64,7 +64,11 @@ function call(ctx: Context, owner: Agent | undefined, args: unknown) {
 
 async function setup(
   config: ToolStrReplaceEditor.Config = {},
-  options: { fsPolicy?: boolean; sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' } = {},
+  options: {
+    fsPolicy?: boolean
+    sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
+    bareWithPolicy?: 'read-only' | 'workspace-write' | 'danger-full-access'
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-tool-str-replace-editor-'))
   roots.push(root)
@@ -73,7 +77,12 @@ async function setup(
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
-  if (options.sandboxMode === undefined) {
+  if (options.bareWithPolicy !== undefined) {
+    // Minimal-preset shape: a BARE local filesystem (no confinement) mounted
+    // alongside a host sandbox-policy. The editor must still enforce the mode.
+    await ctx.plugin(SandboxPolicy, { mode: options.bareWithPolicy, workspaceRoot: root })
+    await ctx.plugin(LocalFileSystem, { cwd: root })
+  } else if (options.sandboxMode === undefined) {
     await ctx.plugin(LocalFileSystem, { cwd: root })
   } else {
     await ctx.plugin(SandboxPolicy, { mode: options.sandboxMode, workspaceRoot: root })
@@ -497,6 +506,71 @@ describe('tool-str-replace-editor', () => {
       file_text: 'blocked',
     })
     expect(ownerless.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
+  })
+
+  it('enforces the sandbox policy on a bare filesystem backend (minimal preset)', async () => {
+    const { ctx, root, owner } = await setup({}, { bareWithPolicy: 'read-only' })
+    const blocked = await call(ctx, owner, {
+      command: 'create',
+      path: join(root, 'blocked.txt'),
+      file_text: 'blocked',
+    })
+    expect(blocked.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
+    expect(text(blocked)).toContain('[sandbox: file access denied under read-only mode]')
+
+    const replace = await call(ctx, owner, {
+      command: 'str_replace',
+      path: join(root, 'does-not-exist.txt'),
+      old_str: 'x',
+      new_str: 'y',
+    })
+    expect(replace.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
+
+    const insert = await call(ctx, owner, {
+      command: 'insert',
+      path: join(root, 'does-not-exist.txt'),
+      insert_line: 0,
+      new_str: 'y',
+    })
+    expect(insert.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
+  })
+
+  it('confines workspace-write mutations to the workspace on a bare filesystem backend', async () => {
+    // Workspace under HOME, deliberately NOT tmpdir: `workspace-write` grants
+    // /tmp and os.tmpdir(), so an "outside" dir under tmpdir would be legitimately
+    // writable. A sibling under HOME is outside every grant.
+    const base = await mkdtemp(join(homedir(), '.dsh-str-replace-editor-'))
+    roots.push(base)
+    const workspace = join(base, 'ws')
+    const outsideDir = join(base, 'out')
+    await mkdir(workspace)
+    await mkdir(outsideDir)
+
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SandboxPolicy, { mode: 'workspace-write', workspaceRoot: workspace })
+    await ctx.plugin(LocalFileSystem, { cwd: workspace })
+    await ctx.plugin(ToolStrReplaceEditor)
+    const owner = agent(ctx, workspace)
+
+    const inside = join(workspace, 'inside.txt')
+    expect((await call(ctx, owner, {
+      command: 'create',
+      path: inside,
+      file_text: 'inside',
+    })).isError).toBe(false)
+    expect(await readFile(inside, 'utf8')).toBe('inside')
+
+    const outside = await call(ctx, owner, {
+      command: 'create',
+      path: join(outsideDir, 'escape.txt'),
+      file_text: 'outside',
+    })
+    expect(outside.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
+    expect(text(outside)).toContain('[sandbox: file access denied under workspace-write mode]')
   })
 
   it('preserves tabs outside the edited region', async () => {
