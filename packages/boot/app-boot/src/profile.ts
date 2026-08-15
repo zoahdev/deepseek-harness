@@ -264,7 +264,7 @@ export function readProfileManifest(binName: string, dir: string): ProfileManife
   const path = join(dir, 'package.json')
   let raw: string
   try {
-    raw = readFileSync(path, 'utf8')
+    raw = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
   } catch (error) {
     throw new Error(`${binName}: failed to read profile manifest ${path}: ${String(error)}`)
   }
