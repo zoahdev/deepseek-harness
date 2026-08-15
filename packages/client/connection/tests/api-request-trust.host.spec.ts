@@ -68,6 +68,18 @@ describe('isTrustedApiRequest', () => {
     expect(isTrustedApiRequest(request({ host: 'localhost:3080', 'sec-fetch-site': 'same-origin' }), [])).toBe(true)
   })
 
+  it('accepts a browser Origin whose serialization omits the non-default port (#2009)', () => {
+    // Chromium 151 (Edge) sent `Origin: http://127.0.0.1` for a page served at
+    // `http://127.0.0.1:3080`; Host kept the port, so an exact `.host`
+    // comparison rejected every POST with 403. Hostname matching follows the
+    // trustedHosts port-less convention.
+    expect(isTrustedApiRequest(request({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1' }), [])).toBe(true)
+    expect(isTrustedApiRequest(request({ host: 'localhost:3080', origin: 'http://localhost' }), [])).toBe(true)
+    expect(isTrustedApiRequest(request({ host: 'harness.internal:3080', origin: 'http://harness.internal' }), ['harness.internal'])).toBe(true)
+    // A different hostname is still refused.
+    expect(isTrustedApiRequest(request({ host: '127.0.0.1:3080', origin: 'http://evil.example' }), [])).toBe(false)
+  })
+
   it('assertTrustedAuthority accepts bare authorities and throws on anything more', () => {
     for (const entry of ['harness.internal', 'harness.internal:3080', 'HARNESS.internal:80', '10.0.0.9', '[::1]:3080']) {
       expect(() => { assertTrustedAuthority(entry) }).not.toThrow()

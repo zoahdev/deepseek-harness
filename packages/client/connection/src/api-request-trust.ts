@@ -116,7 +116,14 @@ export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: read
   const origin = header(request.headers, 'origin')
   if (origin === undefined) return true
   try {
-    return new URL(origin).host === hostUrl.host
+    // Compare hostnames only: Chromium can serialize the Origin without the
+    // non-default port (Edge 151 sent `http://127.0.0.1` for a page served at
+    // `:3080`), while the Host header keeps it - an exact `.host` comparison
+    // then 403s every POST (discussion #2009). Port-less matching mirrors the
+    // trustedHosts convention (a port-less authority matches any port), and
+    // the fence remains a same-site defense, not an auth layer: local
+    // processes can already pass with Origin-less requests.
+    return new URL(origin).hostname === hostUrl.hostname
   } catch {
     return false
   }
