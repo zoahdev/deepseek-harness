@@ -1713,7 +1713,10 @@ export class ToolRuntime extends Service {
     switch (outcome) {
       case 'allowed-once': return { decision: { kind: 'allow' }, approvalCancelled: false }
       case 'rejected': return {
-        decision: { kind: 'deny', reason: `the user rejected tool "${exec.name}"` },
+        decision: {
+          kind: 'deny',
+          reason: `The user rejected tool "${exec.name}". Stop and ask the user what they would like to do instead — do not retry the same action or try to work around the rejection.`,
+        },
         approvalCancelled: false,
       }
       case 'cancelled': return {
