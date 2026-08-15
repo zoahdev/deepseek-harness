@@ -129,7 +129,20 @@ describe('scanRows', () => {
   })
 
   it('an empty log preserves nothing and has no torn tail', () => {
-    expect(scanRows([])).toEqual({ preserved: [] })
+    expect(scanRows([])).toEqual({ preserved: [], skippedDuplicateSeqs: [] })
+  })
+
+  it('skips a single duplicate seq and keeps the contiguity contract (#2068)', () => {
+    const duplicate: SessionEvent[] = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'session/end-seed', seq: 1, time: 2, data: {} },
+      { type: 'agent/inbox/spliced', seq: 1, time: 3, data: {} }, // duplicate of seq 1
+      { type: 'turn/end', seq: 2, time: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const { preserved, tornFrom, skippedDuplicateSeqs } = scanRows(rows(duplicate))
+    expect(preserved.map(e => e.seq)).toEqual([0, 1, 2])
+    expect(tornFrom).toBeUndefined()
+    expect(skippedDuplicateSeqs).toEqual([1])
   })
 
   it('throws on a seq gap inside the committed region (before the last turn/end)', () => {

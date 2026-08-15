@@ -229,7 +229,10 @@ export function rowToEvent(row: EventRow): SessionEvent {
  * @returns the preserved event prefix, plus `tornFrom` — the seq the physical
  *   delete starts at — when a torn tail exists.
  */
-export function scanRows(rows: readonly EventRow[], base = 0): { preserved: SessionEvent[]; tornFrom?: number } {
+export function scanRows(
+  rows: readonly EventRow[],
+  base = 0,
+): { preserved: SessionEvent[]; tornFrom?: number; skippedDuplicateSeqs: number[] } {
   // Pass 1: parse each row's data; a row whose data is not valid JSON is a hole.
   // (The seq/type COLUMNS are always present even when `data` is corrupt.)
   interface Parsed { ok: boolean; event?: SessionEvent }
@@ -251,20 +254,34 @@ export function scanRows(rows: readonly EventRow[], base = 0): { preserved: Sess
   // Preserve the contiguous prefix, including a complete interrupted turn;
   // holes through the last committed boundary throw, while later holes stop.
   const preserved: SessionEvent[] = []
+  const skippedDuplicateSeqs: number[] = []
+  let expected = base
+  let torn = false
   for (let i = 0; i < rows.length; i++) {
     const p = parsed[i]
     if (!p?.ok || p.event === undefined) {
       if (i <= lastTurnEnd) throw new Error(`corrupt session log: unparsable committed event at seq ${rows[i]?.seq}`)
+      torn = true
       break // torn tail fragment after the last turn/end — stop, tolerate
     }
-    if (p.event.seq !== base + i) {
-      if (i <= lastTurnEnd) throw new Error(`corrupt session log: seq gap in committed region (expected ${base + i}, got ${p.event.seq})`)
+    if (p.event.seq !== expected) {
+      // Tolerate one duplicate seq (#2068): same number as the last accepted
+      // event. Skip it; the next row must continue at `expected`.
+      if (p.event.seq === expected - 1) {
+        skippedDuplicateSeqs.push(p.event.seq)
+        continue
+      }
+      if (i <= lastTurnEnd) throw new Error(`corrupt session log: seq gap in committed region (expected ${expected}, got ${p.event.seq})`)
+      torn = true
       break // gap after the last turn/end — torn tail, stop
     }
     preserved.push(p.event)
+    expected += 1
   }
 
   // Any rows past the preserved prefix are a never-committed torn tail; their
   // first seq is the deletion point for load's physical repair.
-  return preserved.length < rows.length ? { preserved, tornFrom: base + preserved.length } : { preserved }
+  return torn
+    ? { preserved, tornFrom: base + preserved.length, skippedDuplicateSeqs }
+    : { preserved, skippedDuplicateSeqs }
 }
