@@ -60,6 +60,28 @@ function requestProposal(header: EpochHeader): LlmCallConfig {
   return proposal
 }
 
+/**
+ * Normalize an abort reason into a durable, JSON-serializable cancel cause.
+ *
+ * On Windows, an externally aborted controller can carry a DOMException as
+ * `signal.reason`, which is not JSON-serializable: `session.append` rejected
+ * the `turn/end` record, the finally block surfaced the serialization error,
+ * and a user-initiated stop was reported as `host/agent-error` instead of an
+ * `aborted` turn end (discussion #1997).
+ */
+function toDurableCancelCause(reason: unknown): AgentCancelCause {
+  if (reason !== null && typeof reason === 'object' && !Array.isArray(reason)) {
+    const candidate = reason as { kind?: unknown; reason?: unknown }
+    if (candidate.kind === 'user' || candidate.kind === 'parent' || candidate.kind === 'disposed') {
+      return reason as AgentCancelCause
+    }
+    if (candidate.kind === 'hook' && typeof candidate.reason === 'string') {
+      return reason as AgentCancelCause
+    }
+  }
+  return { kind: 'user' }
+}
+
 /** Drives one session through turn and step boundaries. */
 export class ReactLoopAgent implements Agent {
   readonly inbox: Inbox
@@ -301,7 +323,7 @@ export class ReactLoopAgent implements Agent {
       }
     } catch (error: unknown) {
       if (signal.aborted) {
-        turnEnds = { kind: 'aborted', reason: signal.reason as AgentCancelCause }
+        turnEnds = { kind: 'aborted', reason: toDurableCancelCause(signal.reason) }
         throw error
       }
       // Every failure is structured: an `LlmError` keeps its facts, anything

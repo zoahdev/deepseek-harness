@@ -7,7 +7,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
  * @module dsh-agent-loop/tests/cancel
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, TurnEndReason } from '@deepseek-ai/dsh-session'
@@ -55,6 +55,23 @@ function userTexts(agent: Agent): string[] {
 }
 
 describe('Agent.cancel()', () => {
+  it('normalizes a non-JSON-serializable abort reason (Windows DOMException) to a durable user cancel (#1997)', async () => {
+    const adapter = new MockAdapter(['hang'])
+    const ctx = await harness(adapter)
+    const agent = ctx.agentLoop.create(SessionId('dom-exception-abort'), { provider: 'mock', model: 'mock' })
+    send(agent, 'running turn')
+    await vi.waitFor(() => { expect(adapter.requests.length).toBe(1) })
+    // Simulate the Windows Web UI stop path: the controller is aborted with
+    // no typed cause, so signal.reason is a DOMException.
+    const phase = (agent as unknown as { phase: { abort: AbortController } }).phase
+    phase.abort.abort(new DOMException('The operation was aborted', 'AbortError'))
+    await agent.whenIdle()
+    const lastEnd = agent.session.events.findLast(event => event.type === 'turn/end')?.data.reason
+    expect(lastEnd).toEqual({ kind: 'aborted', reason: { kind: 'user' } })
+    expect(agent.session.events.some(event =>
+      event.type === 'turn/end' && event.data.reason.kind === 'error')).toBe(false)
+  })
+
   it('cancel() on an idle agent with nothing queued is a no-op; the next prompt runs (F2 leak guard)', async () => {
     const adapter = new MockAdapter([textResponse('reply')])
     const ctx = await harness(adapter)
