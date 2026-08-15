@@ -765,7 +765,10 @@ describe('ToolRuntime', () => {
 
       const result = await ctx.tools.execute({ signal: testToolSignal, callId: CallId('c1'), name: 'echo', arguments: {}, agent: fakeAgent() })
       expect(result.isError).toBe(true)
-      expect(result.content[0]).toMatchObject({ text: 'Error: the user rejected tool "echo"' })
+      expect(result.content[0]).toMatchObject({
+        text: 'Error: The user rejected tool "echo". Stop and ask the user what they would like to do instead — do not retry the same action or try to work around the rejection.',
+      })
+      expect(result.concludesTurn).toBe(true)
     })
 
     it('denies with the cancellation reason on cancelled', async () => {

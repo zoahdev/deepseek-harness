@@ -573,7 +573,7 @@ export interface ToolExecutionFailure {
   readonly content: ContentBlock[]
   readonly meta?: JsonValue
   readonly additionalContexts?: UserMessage[]
-  readonly concludesTurn?: never
+  readonly concludesTurn?: true
 }
 
 /** The discriminated, execution-local outcome of one tool call. */
@@ -587,7 +587,7 @@ export type ToolExecutionResult = ToolExecutionSuccess | ToolExecutionFailure
  */
 export type PreToolDecision =
   | { kind: 'allow' }
-  | { kind: 'deny'; reason: string }
+  | { kind: 'deny'; reason: string; concludesTurn?: true }
   | { kind: 'ask'; reason?: string }
 
 /**
@@ -1487,6 +1487,8 @@ export class ToolRuntime extends Service {
         ? this.guardReason(exec)
         : decision.reason
       if (denialReason !== undefined) {
+        const concludesTurn = decision.kind === 'deny' && decision.concludesTurn === true
+        if (concludesTurn) exec.concludeTurn()
         return await next({
           kind: 'post-result',
           exec,
@@ -1494,6 +1496,7 @@ export class ToolRuntime extends Service {
             content: [{ type: 'text', text: `Error: ${denialReason}` }],
             isError: true,
             error: { message: denialReason },
+            ...concludesTurn ? { concludesTurn: true as const } : {},
           }),
         })
       }
@@ -1713,7 +1716,11 @@ export class ToolRuntime extends Service {
     switch (outcome) {
       case 'allowed-once': return { decision: { kind: 'allow' }, approvalCancelled: false }
       case 'rejected': return {
-        decision: { kind: 'deny', reason: `the user rejected tool "${exec.name}"` },
+        decision: {
+          kind: 'deny',
+          reason: `The user rejected tool "${exec.name}". Stop and ask the user what they would like to do instead — do not retry the same action or try to work around the rejection.`,
+          concludesTurn: true,
+        },
         approvalCancelled: false,
       }
       case 'cancelled': return {
@@ -1851,7 +1858,12 @@ export class ToolRuntime extends Service {
       ...result.additionalContexts !== undefined ? { additionalContexts: result.additionalContexts } : {},
     }
     if (result.isError) {
-      return materializePresentation({ isError: true as const, error: result.error, ...presentation })
+      return materializePresentation({
+        isError: true as const,
+        error: result.error,
+        ...presentation,
+        ...result.concludesTurn === true ? { concludesTurn: true as const } : {},
+      })
     }
     const detached = materializePresentation({
       isError: false as const,
