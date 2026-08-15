@@ -449,6 +449,13 @@ export type ScheduledToolDispatch =
  * @internal
  */
 export interface ToolRuntimeScheduler {
+  /**
+   * Scheduler protocol version. `dsh-agent-loop` refuses a scheduler whose
+   * version differs from its own copy of dsh-tools, so a version-skewed
+   * duplicate instance (e.g. rc.5 vs rc.6) still fails loudly instead of
+   * running an incompatible protocol through the shared symbol key.
+   */
+  readonly protocolVersion: number
   /** Materialize input, run the ordered pre-execute/guard gate, and decide what stage follows. */
   prepare(exec: ToolExecutionInput): Promise<ScheduledToolPreparation>
   /** Run only the around-dispatch/body stage. */
@@ -470,6 +477,41 @@ export interface ToolRuntimeScheduler {
  * @internal
  */
 export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol.for('@deepseek-ai/dsh-tools.scheduler')
+
+/**
+ * Version of the scheduler protocol shared through
+ * {@link TOOL_RUNTIME_SCHEDULER}. Bump when the scheduler surface changes.
+ * @internal
+ */
+export const TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION = 1
+
+/**
+ * Validate a scheduler read through {@link TOOL_RUNTIME_SCHEDULER} before use.
+ *
+ * The symbol key is shared across module instances (see discussion #1697), so
+ * a missing or version-mismatched scheduler must fail loudly: silently running
+ * a different copy's protocol would turn today's crash into a subtle
+ * cross-version mismatch.
+ * @internal
+ */
+export function assertSchedulerProtocol(scheduler: unknown): ToolRuntimeScheduler {
+  if (scheduler === null || scheduler === undefined) {
+    throw new Error(
+      'tool runtime scheduler is unavailable: a duplicate @deepseek-ai/dsh-tools instance is likely '
+      + 'shadowing the host copy (see discussion #1697). Upgrade the harness to 0.1.0-rc.6 and reinstall '
+      + 'the profile so the host instance is resolved first.',
+    )
+  }
+  const candidate = scheduler as { protocolVersion?: unknown }
+  if (candidate.protocolVersion !== TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION) {
+    throw new Error(
+      `tool runtime scheduler protocol version mismatch: expected ${TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION}, `
+      + `got ${String(candidate.protocolVersion)}. Copies of @deepseek-ai/dsh-tools with different versions are `
+      + 'both loaded; reinstall the profile against a single version (see discussion #1697).',
+    )
+  }
+  return scheduler as ToolRuntimeScheduler
+}
 
 /** Canonical error code for cancellation after a tool body was invoked. */
 export const TOOL_ABORTED = 'ABORTED'
@@ -800,6 +842,7 @@ export class ToolRuntime extends Service {
 
   /** Internal staged view consumed by `dsh-agent-loop`'s parallel scheduler. */
   readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler = {
+    protocolVersion: TOOL_RUNTIME_SCHEDULER_PROTOCOL_VERSION,
     prepare: exec => this.prepareScheduledExecution(exec),
     dispatch: exec => this.dispatchScheduledExecution(exec),
     finalize: (exec, result) => this.finalizeScheduledExecution(exec, result),
