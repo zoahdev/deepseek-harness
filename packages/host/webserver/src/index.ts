@@ -214,9 +214,20 @@ export class WebServer extends Service {
     })
 
     await new Promise<void>((resolve, reject) => {
-      this.server.once('error', reject)
+      const onListenError = (error: NodeJS.ErrnoException): void => {
+        if (error?.code === 'EADDRINUSE') {
+          reject(new Error(
+            `dsh web is already running: ${this.config.host}:${this.config.port} is in use. ` +
+            'Stop the existing instance, or start dsh on a different port.',
+            { cause: error },
+          ))
+          return
+        }
+        reject(error)
+      }
+      this.server.once('error', onListenError)
       this.server.listen(this.config.port, this.config.host, () => {
-        this.server.off('error', reject)
+        this.server.off('error', onListenError)
         this.server.on('error', (err) => { this.ctx.logger.error(err) })
         this.listenedPort = (this.server.address() as AddressInfo).port
         resolve()
