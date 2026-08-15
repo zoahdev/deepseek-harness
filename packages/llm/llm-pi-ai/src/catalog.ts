@@ -196,6 +196,12 @@ export interface PiAiCompatProfile {
   thinkingFormat?: PiAiThinkingFormat
   /** Whether the endpoint accepts `reasoning_effort`; absent keeps the catalog entry's, then pi-ai's baseURL-derived guess. */
   supportsReasoningEffort?: boolean
+  /** Whether the endpoint accepts the `developer` role (vs only `system`); absent keeps the catalog entry's, then pi-ai's baseURL-derived guess (#2023). */
+  supportsDeveloperRole?: boolean
+  /** Whether the endpoint accepts the `store` field; absent keeps the catalog entry's, then pi-ai's baseURL-derived guess (#2023). */
+  supportsStore?: boolean
+  /** Whether replayed assistant messages must carry an empty `reasoning_content` when reasoning is enabled (#2023). */
+  requiresReasoningContentOnAssistantMessages?: boolean
 }
 
 /** One configured model entry: an id plus the catalog fields it overrides. */
@@ -394,11 +400,20 @@ function resolveModelCompat(
 ): { compat: OpenAICompletionsCompat } | Record<string, never> {
   const thinkingFormat = entry.compat?.thinkingFormat ?? route?.thinkingFormat
   const supportsReasoningEffort = entry.compat?.supportsReasoningEffort ?? route?.supportsReasoningEffort
-  if (thinkingFormat === undefined && supportsReasoningEffort === undefined) return {}
+  const supportsDeveloperRole = entry.compat?.supportsDeveloperRole ?? route?.supportsDeveloperRole
+  const supportsStore = entry.compat?.supportsStore ?? route?.supportsStore
+  const requiresReasoningContentOnAssistantMessages = entry.compat?.requiresReasoningContentOnAssistantMessages
+    ?? route?.requiresReasoningContentOnAssistantMessages
+  const anySwitch = thinkingFormat !== undefined
+    || supportsReasoningEffort !== undefined
+    || supportsDeveloperRole !== undefined
+    || supportsStore !== undefined
+    || requiresReasoningContentOnAssistantMessages !== undefined
+  if (!anySwitch) return {}
   if (api !== 'openai-completions') {
-    if (entry.compat?.thinkingFormat !== undefined || entry.compat?.supportsReasoningEffort !== undefined) {
+    if (anySwitch && entry.compat !== undefined) {
       invalid(provider, `model "${entry.id}" sets compat reasoning switches, but its api is "${api}";`
-        + ' thinkingFormat and supportsReasoningEffort exist only on openai-completions')
+        + ' the compat switches exist only on openai-completions')
     }
     return {}
   }
@@ -414,6 +429,11 @@ function resolveModelCompat(
       ...inherited,
       ...thinkingFormat === undefined ? {} : { thinkingFormat },
       ...supportsReasoningEffort === undefined ? {} : { supportsReasoningEffort },
+      ...supportsDeveloperRole === undefined ? {} : { supportsDeveloperRole },
+      ...supportsStore === undefined ? {} : { supportsStore },
+      ...requiresReasoningContentOnAssistantMessages === undefined
+        ? {}
+        : { requiresReasoningContentOnAssistantMessages },
     },
   }
 }

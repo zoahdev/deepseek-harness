@@ -826,6 +826,25 @@ describe('reasoning-dispatch compat switches', () => {
       anthropic: { compat: { thinkingFormat: 'openai' } },
     })).toThrow(/no model on the route speaks openai-completions/)
   })
+
+  it('forwards role/store/reasoning-content switches on openai-completions routes (#2023)', () => {
+    const models = modelsOf({
+      'qwen-token-plan': {
+        api: 'openai-completions',
+        baseURL: 'https://qwen.test',
+        compat: {
+          supportsDeveloperRole: false,
+          supportsStore: false,
+          requiresReasoningContentOnAssistantMessages: true,
+        },
+        models: [{ id: 'deepseek-v4-flash-0731' }],
+      },
+    }, 'qwen-token-plan')
+    const compat = models.get('deepseek-v4-flash-0731')?.compat as OpenAICompletionsCompat | undefined
+    expect(compat?.supportsDeveloperRole).toBe(false)
+    expect(compat?.supportsStore).toBe(false)
+    expect(compat?.requiresReasoningContentOnAssistantMessages).toBe(true)
+  })
 })
 
 describe('resolution snapshots', () => {
