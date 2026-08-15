@@ -62,6 +62,7 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-random-uuid": "workspace:^",
     "zod": "^4.4.3"
   },
   "devDependencies": {

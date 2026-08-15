@@ -5,6 +5,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { randomUuid } from '@deepseek-ai/dsh-random-uuid'
 import { NamedEntries, ScopedLayers } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
@@ -231,7 +232,7 @@ export class CommandRuntime extends TypertRemoteService {
   /** Monotonic per-instance counter behind {@link mintCommandId}. */
   private commandSeq = 0
   /** Instance token keeping minted ids unique across process restarts over one resumed log. */
-  private readonly instanceToken = crypto.randomUUID().slice(0, 8)
+  private readonly instanceToken = randomUuid().slice(0, 8)
 
   constructor(ctx: Context) {
     super(ctx, 'commands')

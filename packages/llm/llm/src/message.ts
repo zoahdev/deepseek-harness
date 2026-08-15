@@ -1,6 +1,7 @@
 /** Message value types, identity, and immutable construction helpers. */
 
 import { MessageId, type CallId } from './brand.ts'
+import { randomUuid } from '@deepseek-ai/dsh-random-uuid'
 import { deepFreeze } from './call-config.ts'
 import type { ContentBlock, StreamChunk, ToolResultBlock } from './types.ts'
 
@@ -180,7 +181,7 @@ export function createMessage<T extends NewMessage>(
 ): T & Pick<Message, 'id'> {
   return freezeMessage({
     ...input,
-    id: MessageId(crypto.randomUUID()),
+    id: MessageId(randomUuid()),
   })
 }
 

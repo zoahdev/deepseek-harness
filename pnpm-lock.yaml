@@ -1466,6 +1466,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-random-uuid':
+        specifier: workspace:^
+        version: link:../../util/random-uuid
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
@@ -1779,6 +1782,9 @@ importers:
 
   packages/client/ui-conversation:
     dependencies:
+      '@deepseek-ai/dsh-random-uuid':
+        specifier: workspace:^
+        version: link:../../util/random-uuid
       '@deepseek-ai/dsh-settings':
         specifier: workspace:^
         version: link:../../settings/settings
@@ -4734,6 +4740,9 @@ importers:
       '@deepseek-ai/dsh-native-command':
         specifier: workspace:^
         version: link:../../util/native-command
+      '@deepseek-ai/dsh-random-uuid':
+        specifier: workspace:^
+        version: link:../../util/random-uuid
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
@@ -4959,6 +4968,9 @@ importers:
 
   packages/interaction/commands:
     dependencies:
+      '@deepseek-ai/dsh-random-uuid':
+        specifier: workspace:^
+        version: link:../../util/random-uuid
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -5189,6 +5201,9 @@ importers:
 
   packages/llm/llm:
     dependencies:
+      '@deepseek-ai/dsh-random-uuid':
+        specifier: workspace:^
+        version: link:../../util/random-uuid
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
@@ -7939,6 +7954,15 @@ importers:
         version: link:../../runtime-diagnostics/invariants
 
   packages/util/output-retention:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
+  packages/util/random-uuid:
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
