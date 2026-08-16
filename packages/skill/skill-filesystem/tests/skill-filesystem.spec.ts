@@ -205,6 +205,19 @@ describe('FileSystemSkillProvider', () => {
     expect((await ctx.skills.list({ cwd: noGit })).map(skill => skill.name)).toContain('fallback-root')
   })
 
+  it('catalogs a skill whose plain-scalar description contains an unquoted colon (#2378)', async () => {
+    const home = await tempDir('skill-unquoted-colon')
+    const project = await tempDir('skill-unquoted-colon-project')
+    await mkdir(join(project, '.git'), { recursive: true })
+    // writeSkill interpolates the description verbatim, so the unquoted colon
+    // becomes `description: Priority order: check the cache first`.
+    await writeSkill(join(project, '.dsh/skills'), 'colon-skill', 'Priority order: check the cache first')
+
+    const ctx = await setupLocal(home, {})
+    const skill = (await ctx.skills.list({ cwd: project })).find(s => s.name === 'colon-skill')
+    expect(skill?.description).toBe('Priority order: check the cache first')
+  })
+
   it('lets project skills override runtime while runtime overrides custom and user skills', async () => {
     const home = await tempDir('skill-runtime-priority')
     const project = await tempDir('skill-runtime-project')
