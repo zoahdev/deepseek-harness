@@ -1057,6 +1057,20 @@ describe('Session', () => {
     }
   })
 
+  it('accepts a cross-platform absolute cwd in the header (#2405)', () => {
+    const base = { version: SESSION_FORMAT_VERSION, id: SessionId('header-cross-cwd'), createdAt: 123 }
+    // A Windows-style absolute path must be accepted even on a POSIX host, and
+    // a POSIX-style absolute path even on a Windows host.
+    expect(() => Session.create(SessionId('header-cross-cwd'), undefined, {
+      ...base,
+      cwd: 'C:\\Users\\bob\\project',
+    } as SessionHeader)).not.toThrow()
+    expect(() => Session.create(SessionId('header-cross-cwd'), undefined, {
+      ...base,
+      cwd: '/home/bob/project',
+    } as SessionHeader)).not.toThrow()
+  })
+
   it('rejects seed records with invalid fixed-envelope fields', () => {
     const base = {
       type: 'turn/start',
