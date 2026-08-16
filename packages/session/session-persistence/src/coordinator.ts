@@ -890,6 +890,14 @@ export class PersistenceCoordinator<TornMarker = unknown> {
 
   /** Read, repair in memory, validate, and freeze one cold source once. */
   private async prepareCore(id: SessionId): Promise<PreparedSessionSource<TornMarker>> {
+    // Re-check liveness inside the per-id serialize reservation. The public
+    // prepare/load/inspect paths check ctx.sessions, but prepareCore runs later
+    // in the chain, so a session that becomes live in that gap would otherwise
+    // get a synthetic repair closer spliced onto a log the live writer is still
+    // appending to (#2342 repair-writer vs live-writer seq collision).
+    if (this.ctx.sessions.get(id) !== undefined) {
+      throw new Error(`cannot prepare session "${id}" while it is live`)
+    }
     const stored = await this.backend.loadStored(id)
     if (stored === undefined) throw new Error(`session "${id}" not found`)
     try {
