@@ -570,3 +570,19 @@ describe('tool-bash-persistent', () => {
     }).toThrow('description must be non-empty')
   })
 })
+
+describe('wrapCommand', () => {
+  const marker = { start: 'S', end: 'E:' }
+
+  it('uses a leading space, not the `--` bashism (#2271)', () => {
+    const wrapped = ToolBashPersistent.wrapCommand('echo hi', marker)
+    expect(wrapped).not.toContain('eval --')
+    expect(wrapped).toContain("eval $' echo hi'")
+  })
+
+  it('blocks option parsing for a dash-prefixed command portably', () => {
+    const wrapped = ToolBashPersistent.wrapCommand('-n hi', marker)
+    expect(wrapped).not.toContain('eval --')
+    expect(wrapped).toContain("eval $' -n hi'")
+  })
+})

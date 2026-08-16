@@ -75,11 +75,15 @@ function quoteForBash(value: string): string {
     .replaceAll('\n', '\\n')}'`
 }
 
-function wrapCommand(command: string, marker: CommandMarkers): string {
+/* Exported for the #2271 regression test. */
+export function wrapCommand(command: string, marker: CommandMarkers): string {
   // Keep the wrapper on one physical line. An interactive bash prints PS2 for
   // embedded newlines before executing the buffer, which would leak terminal
   // prompts and marker source text into the model-facing result.
-  return `printf '%s\\n' ${quoteForBash(marker.start)}; eval -- ${quoteForBash(command)}; __dsh_persistent_bash_status=$?; printf '%s%s\\n' ${quoteForBash(marker.end)} "$__dsh_persistent_bash_status"`
+  // `eval --` is a bashism: busybox ash takes `--` as the command name. A
+  // leading space inside the quoted word blocks option parsing in every POSIX
+  // shell, so use that instead of `--` (#2271).
+  return `printf '%s\\n' ${quoteForBash(marker.start)}; eval ${quoteForBash(' ' + command)}; __dsh_persistent_bash_status=$?; printf '%s%s\\n' ${quoteForBash(marker.end)} "$__dsh_persistent_bash_status"`
 }
 
 function stripPrompt(text: string): string {
