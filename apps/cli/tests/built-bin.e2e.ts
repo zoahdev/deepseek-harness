@@ -725,6 +725,32 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
     }
   }, 30_000)
 
+  it('keeps an unresolvable declared bundle instead of silently dropping it (#1377)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-plugin-unresolved-'))
+    try {
+      const profileDir = join(home, 'profiles', 'ghost')
+      mkdirSync(profileDir, { recursive: true })
+      writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+        name: 'dsh-profile-ghost',
+        private: true,
+        dependencies: { 'ghost-bundle': 'file:./ghost-bundle' },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'ghost-bundle'] } },
+      }))
+      writeFileSync(join(profileDir, 'cordis.patch.yml'), '[]\n')
+      // `ghost-bundle` is declared but absent from node_modules: unresolvable.
+
+      const result = await runBuiltBin(['plugin', '--profile', 'ghost', 'root'], { DSH_HOME: home })
+      expect(result.code).toBe(0)
+      const manifest = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')) as {
+        dsh: { profile: { bundles: string[] } }
+      }
+      expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', 'ghost-bundle'])
+      expect(result.stderr).toContain('unresolved')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   describe('config dump', () => {
     let home: string
     beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'dsh-dump-bin-')) })

@@ -12,7 +12,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import {
   DEFAULT_PROFILE_BUNDLES,
   initProfile,
@@ -31,20 +31,23 @@ import { INSTALL_ANCHOR } from './profile-boot.ts'
 const NAME = 'dsh'
 
 /**
- * Whether a resolved dependency exports a profile patch, i.e. is a bundle.
+ * How a dependency resolves for reconcile: `bundle` exports a profile patch,
+ * `plain` resolves but does not, and `unresolvable` cannot be found in the
+ * install or profile — a broken declared dependency, not "not a bundle".
  * @param packageName - the dependency's package name.
  * @param profileDir - the profile directory (resolution anchor).
- * @returns true when the package manifest declares `dsh.bundle`.
  */
-function exportsPatch(packageName: string, profileDir: string): boolean {
+type BundleResolution = 'bundle' | 'plain' | 'unresolvable'
+
+function resolveBundleKind(packageName: string, profileDir: string): BundleResolution {
   let dir: string
   try {
     dir = resolveBundleDir(NAME, packageName, INSTALL_ANCHOR, profileDir)
   } catch {
-    return false // pnpm reported success yet the package is unresolvable — treat as plain
+    return 'unresolvable'
   }
   const manifest = readProfileManifest(NAME, dir)
-  return manifest.dsh?.bundle?.patch !== undefined
+  return manifest.dsh?.bundle?.patch !== undefined ? 'bundle' : 'plain'
 }
 
 /** Every `id` a patch list inserts, as a set (duplicate-loader-entry guard). */
@@ -84,7 +87,8 @@ function reconcilePlugins(before: ProfileManifest, profileDir: string): void {
     : new Set<string>()
   let changed = false
   for (const packageName of dependencies) {
-    const isBundle = exportsPatch(packageName, profileDir)
+    const kind = resolveBundleKind(packageName, profileDir)
+    const isBundle = kind === 'bundle'
     if (isBundle && !plugins.includes(packageName)) {
       if (userInsertIds.size > 0) {
         const bundleDir = resolveBundleDir(NAME, packageName, INSTALL_ANCHOR, profileDir)
@@ -102,7 +106,12 @@ function reconcilePlugins(before: ProfileManifest, profileDir: string): void {
       }
       plugins.push(packageName)
       changed = true
-    } else if (!isBundle && !beforeDeps.has(packageName)) {
+    } else if (kind === 'unresolvable' && !beforeDeps.has(packageName)) {
+      process.stderr.write(
+        `${NAME}: warning: ${packageName} is declared but cannot be resolved from the install or profile; ` +
+        'it will not be enabled as a profile layer (discussion #1377)\n',
+      )
+    } else if (kind === 'plain' && !beforeDeps.has(packageName)) {
       process.stderr.write(
         `${NAME}: warning: ${packageName} declares no dsh.bundle — installed as a plain dependency, not a profile layer `
         + '(a later update that gains one activates it automatically)\n',
@@ -114,7 +123,20 @@ function reconcilePlugins(before: ProfileManifest, profileDir: string): void {
     // Only dependency-managed entries are subject to removal; template
     // bundles (dsh-base and friends) are not dependencies.
     const wasDependency = beforeDeps.has(packageName) || dependencySet.has(packageName)
-    const stillBundle = dependencySet.has(packageName) && exportsPatch(packageName, profileDir)
+    if (!wasDependency) continue
+    const kind = dependencySet.has(packageName)
+      ? resolveBundleKind(packageName, profileDir)
+      : 'plain'
+    // A declared dependency that is now unresolvable must NOT be silently
+    // dropped from the bundle list: that hides a broken profile (#1377).
+    if (kind === 'unresolvable') {
+      process.stderr.write(
+        `${NAME}: warning: ${packageName} is declared but unresolved; keeping it in the bundle list ` +
+        `(run 'dsh plugin --profile ${basename(profileDir)} add ${packageName}' to repair, discussion #1377)\n`,
+      )
+      continue
+    }
+    const stillBundle = kind === 'bundle'
     if (wasDependency && !stillBundle) {
       plugins.splice(plugins.indexOf(packageName), 1)
       changed = true
