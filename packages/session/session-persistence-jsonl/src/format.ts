@@ -363,17 +363,33 @@ export class SessionLogScanner {
     for (const event of decoded) {
       if (event.seq !== this.events.length) {
         const expected = this.events.length
-        this.events.length = rowStart
-        this.issue = new Error(
-          `corrupt session log: seq gap in committed region at line ${this.eventLine} `
-          + `(expected ${expected}, got ${event.seq})`,
-        )
-        if (decoded.some(candidate => candidate.type === 'turn/end')) throw this.issue
-        return
+        // Tolerate the synthetic-tail collision (#2342): a backwards seq right
+        // after a synthetic turn/end means a repair writer spliced regenerable
+        // closers onto a log the live writer kept appending to. Drop only that
+        // synthetic tail and re-align with the real events.
+        if (event.seq < expected && this.events.length === rowStart && this.endsWithSyntheticTail()) {
+          this.events.length = event.seq
+        } else {
+          this.events.length = rowStart
+          this.issue = new Error(
+            `corrupt session log: seq gap in committed region at line ${this.eventLine} `
+            + `(expected ${expected}, got ${event.seq})`,
+          )
+          if (decoded.some(candidate => candidate.type === 'turn/end')) throw this.issue
+          return
+        }
       }
       this.events.push(event)
     }
     this.committedBytes = endByte
+  }
+
+  /** True when the consumed prefix ends in a synthetic interrupted-turn closer. */
+  private endsWithSyntheticTail(): boolean {
+    const last = this.events.at(-1)
+    if (last?.type !== 'turn/end') return false
+    const reason = (last.data as { reason?: { kind?: string } } | undefined)?.reason
+    return reason?.kind === 'interrupted'
   }
 }
 

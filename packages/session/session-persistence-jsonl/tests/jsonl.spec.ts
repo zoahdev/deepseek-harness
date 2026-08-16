@@ -1010,6 +1010,25 @@ describe('JsonlSessionPersistence: scanLog unit', () => {
     const { events } = scanLog(Buffer.from(log))
     expect(events.map(e => e.seq)).toEqual([0, 1]) // tail dropped
   })
+
+  it('tolerates a synthetic-tail collision (backwards seq after an interrupted turn/end)', () => {
+    const log = [
+      JSON.stringify({ type: 'session', version: 0, id: 'st', createdAt: 1, delegationDepth: 0 }),
+      JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'step/start', seq: 1, time: 2, data: { turn: 1, step: 1 } }),
+      // synthetic repair tail: step/end + turn/end {interrupted}
+      JSON.stringify({ type: 'step/end', seq: 2, time: 3, data: { turn: 1, step: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 3, time: 3, data: { turn: 1, reason: { kind: 'interrupted' } } }),
+      // real events the live writer kept appending (collide with the synthetic tail)
+      JSON.stringify({ type: 'step/start', seq: 2, time: 4, data: { turn: 2, step: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 3, time: 5, data: { turn: 2, reason: { kind: 'completed' } } }),
+    ].join('\n') + '\n'
+    const { events } = scanLog(Buffer.from(log))
+    // the regenerable synthetic tail is dropped; the real events are preserved
+    expect(events.map(e => e.seq)).toEqual([0, 1, 2, 3])
+    const last = events.at(-1)
+    expect(last?.type === 'turn/end' && last.data.reason).toEqual({ kind: 'completed' })
+  })
 })
 
 describe('JsonlSessionPersistence: default packed chunk rows', () => {
