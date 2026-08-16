@@ -159,28 +159,13 @@ export function apply(ctx: Context): void {
     parameters: {
       plugin: {
         required: true,
-        oneOf: [
-          {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              kind: { type: 'string', const: 'new', required: true },
-              idPrefix: {
-                type: 'string',
-                required: true,
-                description: 'Suggested semantic prefix of 3–6 lowercase English letters; the Host adds a unique numeric suffix.',
-              },
-            },
-          },
-          {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              kind: { type: 'string', const: 'existing', required: true },
-              pluginId: { type: 'string', required: true, description: 'Exact ID of an existing Plugin; the new Package is appended to that instance.' },
-            },
-          },
-        ],
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { type: 'string', enum: ['new', 'existing'], required: true },
+          idPrefix: { type: 'string', description: 'Suggested semantic prefix of 3–6 lowercase English letters; the Host adds a unique numeric suffix.' },
+          pluginId: { type: 'string', description: 'Exact ID of an existing Plugin; the new Package is appended to that instance.' },
+        },
       },
       name: { type: 'string', required: true, description: 'Short, readable Package name.' },
       purpose: { type: 'string', required: true, description: 'One-sentence, user-facing description of the Package purpose.' },
@@ -215,6 +200,13 @@ export function apply(ctx: Context): void {
       presentationMeta: (_args, value) => ({ pluginId: value.pluginId, packageId: value.packageId }),
     },
     execute(args, exec) {
+      // oneOf schemas get stringified by some providers (e.g. PI-AI), so branch
+      // validation happens here against a plain object schema (#2376).
+      if (args.plugin.kind === 'new') {
+        if (args.plugin.idPrefix === undefined) throw new Error('cordis_define kind:"new" requires idPrefix')
+      } else if (args.plugin.kind === 'existing') {
+        if (args.plugin.pluginId === undefined) throw new Error('cordis_define kind:"existing" requires pluginId')
+      }
       const plugin = args.plugin.kind === 'new'
         ? { kind: 'new' as const, idPrefix: args.plugin.idPrefix }
         : { kind: 'existing' as const, pluginId: CordisDynamicPluginId(args.plugin.pluginId) }
