@@ -7,7 +7,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { isAbsolute } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { deepFreeze } from '@deepseek-ai/dsh-llm'
 import { scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
@@ -111,7 +111,10 @@ function validateSessionHeader(id: SessionId, input: unknown): SessionHeader {
   }
   if (record.cwd !== undefined) {
     if (typeof record.cwd !== 'string') throw new Error('session header cwd must be a string')
-    if (!isAbsolute(record.cwd)) {
+    // Accept either platform's absolute-path shape: a session restored on a
+    // different OS still carries the cwd written by its originating host
+    // (e.g. a Windows-created `C:\...` read on POSIX) (#2405).
+    if (!posix.isAbsolute(record.cwd) && !win32.isAbsolute(record.cwd)) {
       throw new Error(`session header cwd must be an absolute path, got "${record.cwd}"`)
     }
   }
