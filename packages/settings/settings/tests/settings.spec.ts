@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SettingsProvider, SettingsConflictError, deepEqualJson, installSettingsSection, settingsNamespace, type SettingsNamespace, type SettingsScope, type SettingsUpdateSource } from '../src/index.ts'
+import { SettingsProvider, SettingsConflictError, deepEqualJson, installSettingsSection, mergeLayers, settingsNamespace, type SettingsNamespace, type SettingsScope, type SettingsUpdateSource } from '../src/index.ts'
 import { MemorySettings } from './memory.ts'
 
 /** A provider implementing only the three primitives: the Service Definition owns initialization. */
@@ -232,6 +232,14 @@ describe('update', () => {
       tags: ['c'],
     })
     expect(scope.get()).toEqual({ retry: { attempts: 7, delayMs: 300 }, tags: ['c'] })
+  })
+
+  it('keeps a "__proto__" key as an own data property (#1688)', () => {
+    const over = JSON.parse('{"__proto__": {"marker": true}, "ok": "over"}') as Record<string, unknown>
+    const merged = mergeLayers({ ok: 'base' }, over) as Record<string, unknown>
+    expect(Object.hasOwn(merged, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype)
+    expect(merged.ok).toBe('over')
   })
 
   it('commits, notifies watchers, and emits with source update', async () => {

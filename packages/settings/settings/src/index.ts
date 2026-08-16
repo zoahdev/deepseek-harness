@@ -272,12 +272,10 @@ function cloneJsonShaped(
     if (isPlainObject(value)) {
       if (visiting.has(value)) throw reject('a circular reference', path)
       visiting.add(value)
-      // TODO(settings-json-properties): Use property-safe construction here and
-      // in mergeLayers so valid JSON keys such as "__proto__" remain own data.
       const out: Record<string, unknown> = {}
       for (const [key, entry] of Object.entries(value)) {
         if (entry === undefined) continue
-        out[key] = clone(entry, `${path}.${key}`)
+        defineOwn(out, key, clone(entry, `${path}.${key}`))
       }
       visiting.delete(value)
       return out
@@ -294,14 +292,31 @@ function cloneJsonShaped(
  * snapshots pass {@link cloneJsonShaped}, which strips them so a sparse patch
  * cannot erase lower keys.
  */
-function mergeLayers(under: unknown, over: unknown): unknown {
+/* Exported for the #1688 regression test; pure and side-effect-free. */
+export function mergeLayers(under: unknown, over: unknown): unknown {
   if (over === undefined) return under
   if (!isPlainObject(under) || !isPlainObject(over)) return over
   const merged: Record<string, unknown> = { ...under }
   for (const [key, value] of Object.entries(over)) {
-    merged[key] = key in merged ? mergeLayers(merged[key], value) : value
+    defineOwn(merged, key, key in merged ? mergeLayers(merged[key], value) : value)
   }
   return merged
+}
+
+/**
+ * Assign an own data property without invoking `Object.prototype`'s `__proto__`
+ * accessor. Plain `target[key] = value` is a [[Set]], so a key named
+ * `__proto__` (a valid JSON object key from a parsed request body or config
+ * file) would mutate the prototype instead of creating an own property
+ * (#1688). DefineOwnProperty keeps every key an own data property.
+ */
+function defineOwn(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  })
 }
 
 /** Recursively freeze one resolved value so handed-out snapshots stay immutable. */
