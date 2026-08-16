@@ -243,6 +243,28 @@ describe('typert loader', () => {
     }, { timeout: 10_000 })
   })
 
+  it('registers a declared entry whose fiber is not yet attached during activation (#2189)', LOADER_TEST_TIMEOUT, async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-typert-loader-'))
+    await linkZod(root)
+    await writePackage(root, '@fixture/commands', { typertSource: typertSource('@fixture/commands', 'Command') })
+    const ctx = await boot()
+    await ctx.loader.create({ name: '@fixture/commands' })
+    await ctx.loader.await()
+
+    // Mirror the rc.6 web boot ordering that caused #2189: the loader tree
+    // already contains the entry, but its fiber has not been attached when
+    // typert-loader runs its activation scan. Registration must not depend on
+    // the fiber being mounted — the typert manifest is a wire-schema contract
+    // that exists independently of the plugin service lifecycle.
+    const entry = [...ctx.loader.entries()].find(candidate => candidate.options.name === '@fixture/commands')
+    if (entry === undefined) throw new Error('fixture loader entry missing')
+    entry.fiber = undefined
+
+    await mountTypertLoader(ctx)
+
+    expect(ctx.typert.get('@fixture/commands#Command')).toBeDefined()
+  })
+
   it('drops an in-flight manifest when the loader is disposed before import settles', LOADER_TEST_TIMEOUT, async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-typert-loader-'))
     await linkZod(root)

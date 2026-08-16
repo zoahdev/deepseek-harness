@@ -359,7 +359,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const qualifies = (entryName: string): boolean => {
     if (configured.has(entryName)) return true
     for (const entry of ctx.loader.entries()) {
-      if (entry.options.name === entryName && entry.fiber !== undefined && !entry.disabled) return true
+      // A declared entry contributes its typert manifest independently of its
+      // service lifecycle: a not-yet-mounted entry (fiber undefined, disposing
+      // counter zero) still qualifies, while an entry mid-teardown (disposing
+      // counter non-zero) must not re-qualify and block its own withdrawal.
+      if (entry.options.name === entryName && entry._disposing === 0 && !entry.disabled) return true
     }
     return false
   }
