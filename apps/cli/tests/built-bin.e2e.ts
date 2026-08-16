@@ -693,6 +693,38 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
     }
   }, 30_000)
 
+  it('does not promote a bundle dep already inserted via the user patch layer (#1404)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-plugin-dup-id-'))
+    try {
+      const profileDir = join(home, 'profiles', 'dup')
+      const installed = join(profileDir, 'node_modules', 'sidebar')
+      mkdirSync(installed, { recursive: true })
+      writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+        name: 'dsh-profile-dup',
+        private: true,
+        dependencies: { 'sidebar': 'file:./sidebar' },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } },
+      }))
+      // The user loads `sidebar` through their own patch layer by id.
+      writeFileSync(join(profileDir, 'cordis.patch.yml'), '- insert:\n    - id: sidebar\n      name: sidebar-pkg\n')
+      // The installed package ALSO declares a bundle that inserts the same id.
+      writeFileSync(join(installed, 'package.json'), JSON.stringify({
+        name: 'sidebar', version: '1.0.0', dsh: { bundle: { patch: './cordis.patch.yml' } },
+      }))
+      writeFileSync(join(installed, 'cordis.patch.yml'), '- insert:\n    - id: sidebar\n      name: sidebar-pkg\n')
+
+      const result = await runBuiltBin(['plugin', '--profile', 'dup', 'root'], { DSH_HOME: home })
+      expect(result.code).toBe(0)
+      const manifest = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')) as {
+        dsh: { profile: { bundles: string[] } }
+      }
+      expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base'])
+      expect(result.stderr).toContain('already inserted via cordis.patch.yml')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   describe('config dump', () => {
     let home: string
     beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'dsh-dump-bin-')) })

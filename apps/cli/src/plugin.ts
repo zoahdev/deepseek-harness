@@ -16,6 +16,8 @@ import { join, resolve } from 'node:path'
 import {
   DEFAULT_PROFILE_BUNDLES,
   initProfile,
+  loadOptionalPatches,
+  loadOverlayPatches,
   PROFILE_TEMPLATES,
   readProfileManifest,
   resolveBundleDir,
@@ -23,6 +25,7 @@ import {
   writeProfileManifest,
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
+import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { INSTALL_ANCHOR } from './profile-boot.ts'
 
 const NAME = 'dsh'
@@ -44,6 +47,17 @@ function exportsPatch(packageName: string, profileDir: string): boolean {
   return manifest.dsh?.bundle?.patch !== undefined
 }
 
+/** Every `id` a patch list inserts, as a set (duplicate-loader-entry guard). */
+function insertIdsFrom(patches: readonly PatchOptions[]): Set<string> {
+  const ids = new Set<string>()
+  for (const patch of patches) {
+    for (const entry of patch.insert ?? []) {
+      if (typeof entry.id === 'string') ids.add(entry.id)
+    }
+  }
+  return ids
+}
+
 /**
  * Reconcile `dsh.profile.bundles` against the installed state: pnpm has
  * already written the real installed names (so a git/path/tarball/alias spec
@@ -61,10 +75,31 @@ function reconcilePlugins(before: ProfileManifest, profileDir: string): void {
   const beforeDeps = new Set(Object.keys(before.dependencies ?? {}))
   const dependencies = Object.keys(after.dependencies ?? {})
   const plugins = after.dsh?.profile?.bundles ?? []
+  // The user's own patch layer may already insert a bundle-declaring package by
+  // id. Promoting that package into the bundle stack would make the same entry
+  // id arrive twice and crash the loader (#1404), so those ids are excluded.
+  const userPatchPath = join(profileDir, 'cordis.patch.yml')
+  const userInsertIds = existsSync(userPatchPath)
+    ? insertIdsFrom(loadOptionalPatches(NAME, userPatchPath) ?? [])
+    : new Set<string>()
   let changed = false
   for (const packageName of dependencies) {
     const isBundle = exportsPatch(packageName, profileDir)
     if (isBundle && !plugins.includes(packageName)) {
+      if (userInsertIds.size > 0) {
+        const bundleDir = resolveBundleDir(NAME, packageName, INSTALL_ANCHOR, profileDir)
+        const bundlePatch = readProfileManifest(NAME, bundleDir).dsh?.bundle?.patch
+        if (bundlePatch !== undefined) {
+          const bundleIds = insertIdsFrom(loadOverlayPatches(NAME, resolve(bundleDir, bundlePatch)))
+          if ([...bundleIds].some(id => userInsertIds.has(id))) {
+            process.stderr.write(
+              `${NAME}: warning: ${packageName} is already inserted via cordis.patch.yml; ` +
+              'not promoted to the bundle stack to avoid a duplicate loader entry id (discussion #1404)\n',
+            )
+            continue
+          }
+        }
+      }
       plugins.push(packageName)
       changed = true
     } else if (!isBundle && !beforeDeps.has(packageName)) {
