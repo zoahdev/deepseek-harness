@@ -604,7 +604,7 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
     expect(scanLog(await decodeCompleteFrames(repaired)).events).toEqual(loaded.events)
   })
 
-  it('rejects a complete frame containing a torn JSONL record', async () => {
+  it('tolerates a complete frame containing a torn JSONL record (#2202)', async () => {
     const root = await freshRoot()
     const ctx = await mount(root)
     const header = meta('complete-bad-jsonl')
@@ -614,7 +614,10 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
       logPath(root, header.cwd, header.id, 'zstd'),
       await compressZstdFrame('{"type":"turn/start"'),
     )
-    await expect(ctx.sessionPersistence.load(header.id)).rejects.toThrow(/complete frame contains a torn JSONL record/)
+    // The writer flushed a complete frame mid-record; that state is transient
+    // and self-heals. load returns the committed prefix and discards the tail.
+    const loaded = await ctx.sessionPersistence.load(header.id)
+    expect(loaded.events).toEqual(oneTurnLog())
   })
 
   it('rolls back a checksummed append frame when fsync fails', async () => {

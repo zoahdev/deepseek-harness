@@ -379,10 +379,12 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
       }
       signal?.throwIfAborted()
       const complete = scanner.checkpoint()
-      if (complete.committedBytes !== complete.inputBytes) {
-        throw new Error('corrupt Zstandard session log: complete frame contains a torn JSONL record')
-      }
       if (tornStart === undefined) {
+        // Every frame is structurally complete. The final frame may still end
+        // with a torn JSONL record (the writer flushed a ZSTD_e_flush frame
+        // mid-record); that tail is completed on the next append, so return the
+        // committed records and discard the tail instead of reporting corruption
+        // (#2202). Real corruption is caught by consumeEventLine, not this check.
         const prefix = scanner.finish()
         return { meta: prefix.meta, events: prefix.events }
       }
