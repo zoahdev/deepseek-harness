@@ -915,9 +915,42 @@ function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: s
   const closing = findClosingFrontmatter(raw, start)
   if (closing === undefined) return undefined
   const yaml = raw.slice(start, closing.start)
-  const parsed = parseYaml(yaml) as unknown
+  let parsed: unknown
+  try {
+    parsed = parseYaml(yaml)
+  } catch (error) {
+    // Lenient fallback for frontmatter the strict YAML parser rejects — most
+    // commonly an unquoted colon in a plain scalar
+    // (`description: Priority order: check the cache first`, #2378). Mirrors
+    // Claude Code's line-based frontmatter read so a skill that works there
+    // does not silently vanish here. Only this one benign shape is tolerated;
+    // genuinely malformed YAML still propagates and the skill is skipped.
+    if (error instanceof Error && (error as { code?: string }).code === 'BLOCK_AS_IMPLICIT_KEY') {
+      parsed = parseLenientFrontmatter(yaml)
+    } else {
+      throw error
+    }
+  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
   return { data: parsed as Record<string, unknown>, body: raw.slice(closing.bodyStart) }
+}
+
+/** Line-based frontmatter fallback: the value is everything after the first colon. */
+function parseLenientFrontmatter(yaml: string): Record<string, unknown> {
+  const data: Record<string, unknown> = {}
+  for (const rawLine of yaml.split('\n')) {
+    const line = rawLine.replace(/\r$/, '')
+    if (line.trim() === '' || line.trim().startsWith('#')) continue
+    const sep = line.indexOf(':')
+    if (sep <= 0) continue
+    const key = line.slice(0, sep).trim()
+    let value = line.slice(sep + 1).trim()
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    data[key] = value
+  }
+  return data
 }
 
 function findClosingFrontmatter(raw: string, start: number): { start: number; bodyStart: number } | undefined {
