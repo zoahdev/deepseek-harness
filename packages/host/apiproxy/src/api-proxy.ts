@@ -302,7 +302,16 @@ function paginate(
     if (!MESSAGE_TYPES.has(event.type) || !isAppendSurfaceEvent(event)) continue
     count++
     const sources = (event as { sourceEventSeqs?: number[] }).sourceEventSeqs
-    const groupStart = sources !== undefined && sources.length > 0 ? Math.min(event.seq, ...sources) : event.seq
+    // Bounded min instead of `Math.min(event.seq, ...sources)`: a single
+    // max-tokens-truncated message can carry ~255k sourceEventSeqs, and the
+    // spread exceeds V8's argument/call-stack limit (RangeError, discussion
+    // #2358 / #1593). Loop instead of spreading.
+    let groupStart = event.seq
+    if (sources !== undefined) {
+      for (const source of sources) {
+        if (source < groupStart) groupStart = source
+      }
+    }
     if (count >= maxMessages) {
       cut = groupStart
       break
