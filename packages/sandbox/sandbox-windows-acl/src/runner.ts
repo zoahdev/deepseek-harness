@@ -50,6 +50,7 @@ import { join } from 'node:path'
 import { win32 } from './ffi.ts'
 import { AclSandbox, assertTempRootOutsideWorkspace } from './index.ts'
 import { tempWriteSid, workspaceWriteSid } from './workspace-sid.ts'
+import { fastFailHint } from './fast-fail.ts'
 
 const RUNNER_SIGNATURE = 'windows-acl-run'
 const RUNNER_FAILURE_EXIT = 127
@@ -206,6 +207,8 @@ async function main(): Promise<number> {
 
 main().then(
   (exitCode) => {
+    const hint = fastFailHint(exitCode)
+    if (hint !== undefined) process.stderr.write(`${RUNNER_SIGNATURE}: ${hint}\n`)
     // Exit-code mirroring is full-width on Windows, verified empirically on
     // this machine (Windows 11 build 26200, Node 24): a child that exits
     // with the NTSTATUS 0xC0000005 (STATUS_ACCESS_VIOLATION) is read back
