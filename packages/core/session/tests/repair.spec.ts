@@ -85,6 +85,41 @@ describe('interruptedTurnClosers', () => {
     }])
   })
 
+  it('pins the #3232 dual-writer seq overlap: a resume seeded without the repair closers re-issues their seqs', () => {
+    // Crash tail: open turn/step with a dangling tool call; last real seq 2.
+    const crashTail: SessionEvent[] = [
+      userTurnStart(1, 0),
+      { type: 'step/start', seq: 1, time: 1, data: { turn: 1, step: 1 } },
+      { type: 'assistant/message', seq: 2, time: 2, data: {
+        turn: 1, step: 1,
+        message: createMessage({
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'calling a tool' },
+            { type: 'tool-call', id: CallId('call-1'), name: 'bash', arguments: '{}' },
+          ],
+          source: {
+            kind: 'model',
+            ...{ provider: 'mock', model: 'mock' },
+          },
+        }),
+      } },
+    ]
+    const closers = interruptedTurnClosers(crashTail)
+    // Repair path writes closers continuing last.seq + 1.
+    expect(closers.map(e => e.seq)).toEqual([3, 4, 5])
+    // A second writer seeded from the PRE-closer log (log.length = 3) appends
+    // its first live event at seq 3 — colliding with closers[0]. This is the
+    // dual-seq-source overlap behind discussion #3232 (crash recovery with a
+    // concurrent/restarted writer sharing the same profile home).
+    const naiveResumeNextSeq = crashTail.length // get seq() === log.length; the next append takes seq = length
+    expect(naiveResumeNextSeq).toBe(closers[0]!.seq)
+    // Fix direction (single seq source): seed with the balanced log (closers
+    // included) and the next event starts strictly after the closers.
+    const balanced = [...crashTail, ...closers]
+    expect(balanced.length).toBe(closers[closers.length - 1]!.seq + 1)
+  })
+
   it('does NOT synthesize a result for a tool-call that already has one', () => {
     const events: SessionEvent[] = [
       userTurnStart(2, 0),
