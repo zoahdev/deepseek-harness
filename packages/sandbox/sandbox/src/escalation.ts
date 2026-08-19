@@ -156,6 +156,11 @@ export interface EscalationRequest {
  */
 export async function approveEscalation<A, C>(request: EscalationRequest, approval: EscalationApproval<A, C>): Promise<SandboxMode> {
   const { requestedMode: mode, effectiveMode, justification, subject } = request
+  // A same-mode request grants exactly what the call already holds: no
+  // permission gain, no approval prompt. Checked before strict widening so a
+  // danger-full-access -> danger-full-access pass-through is a silent no-op
+  // (WIDER_MODES deliberately has no self-entry).
+  if (mode === effectiveMode) return mode
   // Strict widening is an EXECUTION check against the call's effective mode —
   // deliberately not a schema constraint (the enum is the closed target
   // vocabulary; the effective mode is per-call truth).
