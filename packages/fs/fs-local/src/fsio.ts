@@ -587,7 +587,11 @@ export async function writeFileAtomic(
       } catch (error: unknown) {
         // If the observed target disappears during staging, the protected DACL
         // already copied to the temp remains authoritative for recreation.
-        if (!isENOENT(error)) throw error
+        // EACCES/EPERM additionally cover a watched target (HMR/fs.watch holds an
+        // open handle that makes ReplaceFileW fail with ERROR_ACCESS_DENIED)
+        // while MoveFileExW still succeeds; a genuinely locked target fails
+        // the rename too, so the fallback cannot mask a real access problem.
+        if (!isENOENT(error) && !isPermissionError(error)) throw error
         await rename(tempPath, absolutePath)
       }
     } else {

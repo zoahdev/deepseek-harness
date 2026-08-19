@@ -738,16 +738,33 @@ describe('writeFileAtomic — temp-file safety', () => {
     expect(await readFile(file, 'utf8')).toBe('new')
   })
 
-  it('surfaces a Windows secure-replacement failure and cleans the staging directory', async () => {
+  it('falls back to rename when ReplaceFileW fails with EACCES on a watched target', async () => {
     const file = join(dir, 'a.txt')
     await writeFile(file, 'old')
     const denied = Object.assign(new Error('replace denied'), { code: 'EACCES' })
 
-    await expect(writeFileAtomic(file, 'new', 0o666, undefined, {
+    await writeFileAtomic(file, 'new', 0o666, undefined, {
       platform: 'win32',
       copyFileDacl: () => Promise.resolve(),
       replaceFile: async () => { throw denied },
-    })).rejects.toBe(denied)
+    })
+
+    // HMR/fs.watch holds an open handle: ReplaceFileW fails with
+    // ERROR_ACCESS_DENIED while MoveFileExW (rename) succeeds.
+    expect(await readFile(file, 'utf8')).toBe('new')
+    expect((await readdir(dir)).filter(name => name.includes('.tmp'))).toEqual([])
+  })
+
+  it('surfaces a non-recoverable Windows secure-replacement failure and cleans the staging directory', async () => {
+    const file = join(dir, 'a.txt')
+    await writeFile(file, 'old')
+    const unexpected = new Error('replace failed for an unrelated reason')
+
+    await expect(writeFileAtomic(file, 'new', 0o666, undefined, {
+      platform: 'win32',
+      copyFileDacl: () => Promise.resolve(),
+      replaceFile: async () => { throw unexpected },
+    })).rejects.toBe(unexpected)
     expect(await readFile(file, 'utf8')).toBe('old')
     expect((await readdir(dir)).filter(name => name.includes('.tmp'))).toEqual([])
   })
