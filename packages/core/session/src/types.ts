@@ -389,6 +389,26 @@ export interface SurfaceIntent {
 }
 
 /**
+ * Optional append controls for **non-surface** events. Surface events take a
+ * mandatory {@link SurfaceIntent} instead (the compiler enforces this split
+ * at `Session.append()` call sites); non-surface events may pass nothing, or
+ * this envelope.
+ *
+ * `ignorable: true` marks a purely informational record that a reader may
+ * safely skip when it does not recognize `type` — the forward-compatibility
+ * envelope documented on {@link SessionEvent.ignorable}. Out-of-tree (plugin)
+ * event writers MUST set this on records whose loss cannot affect
+ * reconstruction, so logs containing them survive resume on harness builds
+ * that do not know the type. Absent means required: an unrecognized type
+ * without this marker refuses session reconstruction (a forgotten marker
+ * over-refuses — an inconvenience — rather than silently resuming a gutted
+ * session).
+ */
+export interface AppendOpts {
+  ignorable?: true
+}
+
+/**
  * One immutable entry in the session log.
  *
  * A proper discriminated union over `type` (not independent `type`/`data`

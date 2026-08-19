@@ -20,6 +20,50 @@ describe('Session', () => {
     expect(surface).toBe(session.surface)
   })
 
+  it('accepts the ignorable envelope on non-surface events and persists it on the event', () => {
+    // Out-of-tree plugin events must be able to mark themselves skippable on
+    // the write side; the marker rides on the event so readers that do not
+    // know the type can resume the session instead of refusing it.
+    const session = Session.create(SessionId('ignorable-non-surface'))
+    const event = session.append('turn/start', { turn: 1 }, { ignorable: true })
+    expect(event.ignorable).toBe(true)
+    expect(session.events[0]?.ignorable).toBe(true)
+    // survives structuredClone (the persistence-serialization boundary)
+    expect(structuredClone(event).ignorable).toBe(true)
+  })
+
+  it('leaves the ignorable marker absent when the envelope is not passed', () => {
+    const session = Session.create(SessionId('no-ignorable'))
+    const event = session.append('turn/start', { turn: 1 })
+    expect(event.ignorable).toBeUndefined()
+  })
+
+  it('warns at append time when writing an unknown non-ignorable event type', () => {
+    const session = Session.create(SessionId('unknown-warn'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // @ts-expect-error — out-of-tree type not in SessionEventMap
+      session.append('plugin/test', { payload: 1 })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0]?.[0]).toContain('plugin/test')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('does not warn when an unknown event type is marked ignorable', () => {
+    const session = Session.create(SessionId('unknown-ignorable'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // @ts-expect-error — out-of-tree type not in SessionEventMap
+      session.append('plugin/test', { payload: 1 }, { ignorable: true })
+      expect(warn).not.toHaveBeenCalled()
+      expect(session.events[0]?.ignorable).toBe(true)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('derives message history from the event log', () => {
     const session = Session.create(SessionId('s1'))
     session.append('turn/start', { turn: 1 })

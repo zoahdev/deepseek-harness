@@ -1061,7 +1061,7 @@ export class PersistenceCoordinator<TornMarker = unknown> {
   private assertEventsSupported(meta: SessionHeader, events: readonly SessionEvent[]): void {
     for (const event of events) {
       if (KNOWN_SESSION_EVENT_TYPES.has(event.type) || event.ignorable === true) continue
-      throw this.unsupported(meta, `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`)
+      throw this.unsupported(meta, `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness or by an out-of-tree plugin that did not mark it ignorable`)
     }
   }
 
