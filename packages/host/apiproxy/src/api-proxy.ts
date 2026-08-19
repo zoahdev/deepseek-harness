@@ -35,7 +35,7 @@ import {
 import type { PresetBearingSession } from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {
-  ApiProxy, ConfigurableProviderView, CredentialView, GoalRef, HistoryEntry, HostFrame,
+  ApiProxy, ConfigurableProviderView, CredentialView, DiscoveredModelView, GoalRef, HistoryEntry, HostFrame,
   ModelCatalogFailure, ModelProviderGroup,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
@@ -3348,7 +3348,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             ...apiKey === undefined ? {} : { apiKey },
             ...signal === undefined ? {} : { signal },
           })
-          return ok(request, { models })
+          // The seam's readonly modality list is detached into the mutable
+          // array the wire view declares; ids and capacities pass through.
+          const views: DiscoveredModelView[] = models.map(model => ({
+            id: model.id,
+            ...model.name === undefined ? {} : { name: model.name },
+            ...model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow },
+            ...model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens },
+            ...model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] },
+          }))
+          return ok(request, { models: views })
         } catch (error: unknown) {
           // Every failure here is the user's next move, not a transport fault:
           // a wrong endpoint, a rejected key, or a protocol with no listing all

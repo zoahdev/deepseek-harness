@@ -512,6 +512,14 @@
   gap: 4px;
 }
 
+.modelCheckboxField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: end;
+  padding-bottom: 6px;
+}
+
 .modelFieldLabel {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;

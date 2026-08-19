@@ -150,7 +150,23 @@ function adopt(candidate: DiscoveredModelView): ModelDraft {
     ...candidate.name === undefined ? {} : { name: candidate.name },
     ...candidate.contextWindow === undefined ? {} : { contextWindow: candidate.contextWindow },
     ...candidate.maxTokens === undefined ? {} : { maxTokens: candidate.maxTokens },
+    // Only a disclosed modality list is adopted; an endpoint that stayed
+    // silent leaves the field unset so the row's own declaration decides.
+    ...candidate.inputModalities === undefined ? {} : { input: [...candidate.inputModalities] },
   }
+}
+
+/**
+ * Whether a drafted row declares image input: a `models[].input` list that
+ * names `image`, or an unset list on a route whose `defaultInput` does (the
+ * catalog fallback a stored entry keeps when it declares nothing).
+ * @param model - the drafted row.
+ * @returns whether the row's model accepts images.
+ */
+function rowAcceptsImages(model: ModelDraft): boolean {
+  const input = model.input
+  if (Array.isArray(input)) return input.includes('image')
+  return false
 }
 
 /**
@@ -210,7 +226,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
     })
   }
 
-  const patch = (index: number, next: Record<string, string | number | undefined>): void => {
+  const patch = (index: number, next: Record<string, string | number | readonly string[] | undefined>): void => {
     onChange(models.map((model, at) => {
       if (at !== index) return model
       // Rebuilt rather than spread over: an emptied optional field has to leave
@@ -416,6 +432,21 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                     disabled={disabled}
                     onChange={(event) => { editCapacity(index, 'maxTokens', event.target.value) }}
                   />
+                </label>
+                <label className={styles['modelCheckboxField']}>
+                  <input
+                    type="checkbox"
+                    checked={rowAcceptsImages(model)}
+                    aria-label={`${t('modelAcceptsImages')} ${index + 1}`}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      // The declared list is rewritten, never merged: a hand
+                      // typed list this page does not render would otherwise
+                      // keep deciding while the checkbox disagreed with it.
+                      patch(index, { input: event.target.checked ? ['text', 'image'] : ['text'] })
+                    }}
+                  />
+                  <span className={styles['modelFieldLabel']}>{t('modelAcceptsImages')}</span>
                 </label>
               </div>
             )
