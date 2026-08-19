@@ -25,13 +25,14 @@ const testToolSignal = new AbortController().signal
 /** A scriptable in-repo CodeRuntime: each test sets `behavior` to drive the bindings however it needs. */
 class FakeRuntime extends CodeRuntime {
   readonly language: string
-  readonly isolation = 'fake'
+  readonly isolation: string
   behavior: (request: CodeRunRequest) => Promise<CodeRunResult> = () => Promise.resolve({ logs: [] })
   lastRequest?: CodeRunRequest
 
-  constructor(ctx: Context, config: { language?: string } = {}) {
+  constructor(ctx: Context, config: { language?: string; isolation?: string } = {}) {
     super(ctx)
     this.language = config.language ?? 'typescript'
+    this.isolation = config.isolation ?? 'fake'
   }
 
   run(request: CodeRunRequest): Promise<CodeRunResult> {
@@ -43,7 +44,7 @@ class FakeRuntime extends CodeRuntime {
 interface SetupOptions {
   mode?: Config['mode']
   maxParallelSubCalls?: number
-  runtime?: false | { language?: string }
+  runtime?: false | { language?: string; isolation?: string }
   toolOrder?: string[]
 }
 
@@ -1860,5 +1861,29 @@ describe('per-agent presentation', () => {
 
     await expect(systemPrompt.assemble({ scope: agent }))
       .rejects.toThrow('mode "both" requires a code runtime')
+  })
+
+  it('fails closed: worker-thread runtime under a confined sandbox refuses run_code before dispatch (#3245)', async () => {
+    const { ctx, runtime } = await setup({ mode: 'code', runtime: { isolation: 'worker-thread' } })
+    ctx.provide('sandboxPolicy', {
+      resolve: () => ({ mode: 'read-only' }),
+    })
+
+    const result = await runCode(ctx, 'await import("node:fs")')
+    expect(result.isError).toBe(true)
+    const text = result.content[0]?.type === 'text' ? result.content[0].text : ''
+    expect(text).toContain('not file-effect confined')
+    expect(runtime.lastRequest).toBeUndefined()
+  })
+
+  it('allows worker-thread run_code under an explicit danger-full-access policy', async () => {
+    const { ctx, runtime } = await setup({ mode: 'code', runtime: { isolation: 'worker-thread' } })
+    ctx.provide('sandboxPolicy', {
+      resolve: () => ({ mode: 'danger-full-access' }),
+    })
+
+    const result = await runCode(ctx, 'return 1')
+    expect(result.isError).toBe(false)
+    expect(runtime.lastRequest).not.toBeUndefined()
   })
 })

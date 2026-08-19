@@ -278,6 +278,12 @@ export interface RunCodeBridgeOptions {
   peekRuntime: () => CodeRuntime | undefined
   /** The run's overlap cap for parallel-classified sub-calls (the registry passes its validated `maxParallelSubCalls`). */
   maxParallel: number
+  /**
+   * Resolve the calling scope's sandbox policy mode, or undefined when no
+   * sandbox policy is composed. Used by the security fail-closed guard: a
+   * worker-thread code runtime is not file-effect confined.
+   */
+  resolveSandboxMode?: (exec: { agent?: { session?: unknown } }) => string | undefined
   /** Runs the contained `tools/code-dispatch-log` waterfall over one settled sub-dispatch (the registry's private invoker). */
   shapeDispatchLog: (dispatch: CodeDispatchLog) => Promise<ContentBlock[]>
 }
@@ -332,6 +338,25 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
         throw new Error('invalid description: expected a non-empty string')
       }
       const runtime = requireRuntime()
+
+      // Security fail-closed (#3245): a worker-thread code runtime applies NO
+      // file-effect confinement (no ctx.sandbox.confine, no Landlock/Seatbelt/
+      // bwrap profile around the worker), so under a confined sandbox policy
+      // (read-only or workspace-write) run_code would silently bypass the file
+      // sandbox every other agent code path honors. Refuse loudly instead of
+      // running unconfined; a deployment that genuinely wants unconfined
+      // run_code must explicitly choose danger-full-access (or DSH_TOOLS_MODE
+      // native to disable Code Mode).
+      const policyMode = options.resolveSandboxMode?.(exec)
+      if (runtime.isolation === 'worker-thread'
+        && policyMode !== undefined
+        && policyMode !== 'danger-full-access') {
+        throw new Error(
+                    `run_code cannot run under the worker-thread code runtime while the sandbox policy is "${policyMode}": `
+          + 'the worker is not file-effect confined (sandbox escape). Use DSH_TOOLS_MODE=native, '
+          + 'set the sandbox to danger-full-access, or mount a confinable code runtime.',
+        )
+      }
 
       // The run-scoped abort: follows the outer signal in, and fires when the
       // run settles for ANY reason, so an in-flight sub-dispatch is aborted

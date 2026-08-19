@@ -928,6 +928,15 @@ export class ToolRuntime extends Service {
       peekRuntime: () => this.ctx.get('codeRuntime'),
       maxParallel: this.maxParallelSubCalls,
       shapeDispatchLog: dispatch => this.shapeDispatchLog(dispatch),
+      // Security fail-closed (#3245): the worker-thread code runtime is not
+      // file-effect confined; under a confined sandbox policy run_code must
+      // refuse to dispatch (the registry owns the sandbox policy seam).
+      resolveSandboxMode: (exec) => {
+        const policy = this.ctx.get('sandboxPolicy') as
+          | { resolve(input?: { session?: unknown }): { mode?: string } }
+          | undefined
+        return policy?.resolve(exec.agent === undefined ? {} : { session: exec.agent.session })?.mode
+      },
     })
     return this.codeTransport
   }
