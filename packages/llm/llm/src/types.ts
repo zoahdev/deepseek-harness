@@ -227,6 +227,11 @@ export interface LlmDiscoveredModel {
   contextWindow?: number
   /** Maximum output tokens, when disclosed. */
   maxTokens?: number
+  /**
+   * Accepted request modalities, when disclosed; absent means unknown, and a
+   * surface adopting this model decides the declaration itself.
+   */
+  inputModalities?: readonly ModelModality[]
 }
 
 /** One adapter-discovered model; catalog membership is advisory, not request validation. */
